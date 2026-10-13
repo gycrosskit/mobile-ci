@@ -26,6 +26,40 @@ def read_text(path):
 
 
 class JenkinsfilesTest(unittest.TestCase):
+    def test_packaging_profile_environment_cannot_be_shadowed_by_declarative_constants(self):
+        from project_config import validate_project
+        profiles = [validate_project(json.loads(path.read_text())) for path in (
+            REPO_ROOT / 'tests/fixtures/legacy-project.json',
+            REPO_ROOT / 'examples/second-project/project.json')]
+        roles = ('android_test', 'android_release', 'ios_test', 'ios_release', 'harmony_test', 'harmony_release')
+        pipelines = [profiles[0]['jobs'][role]['pipeline'] for role in roles]
+        self.assertEqual(5, len(set(pipelines)))
+        self.assertNotEqual(profiles[0]['repositories']['application']['ssh'], profiles[1]['repositories']['application']['ssh'])
+
+        def assert_no_shadowing(source):
+            blocks = re.findall(r'\benvironment\s*\{(.*?)^\s*}', source, re.MULTILINE | re.DOTALL)
+            self.assertTrue(blocks)
+            declared = set(re.findall(r'^\s*([A-Z][A-Z0-9_]*)\s*=', '\n'.join(blocks), re.MULTILINE))
+            assigned = set(re.findall(r'\benv\.([A-Z][A-Z0-9_]*)\s*=(?!=)', source))
+            # Declarative withEnv 的优先级高于脚本 env 写入，会把受信配置遮蔽为静态值。
+            self.assertFalse(declared & assigned, declared & assigned)
+
+        for role, pipeline in zip(roles, pipelines):
+            source = read_text(REPO_ROOT / pipeline)
+            with self.subTest(role=role):
+                assert_no_shadowing(source)
+                assignments = re.findall(r'^\s*env\.APP_REPOSITORY_URL\s*=\s*(.+)$', source, re.MULTILINE)
+                self.assertEqual(['ciProject.repositories.application.ssh'], assignments)
+                for profile in profiles:
+                    value = profile
+                    for field in assignments[0].split('.')[1:]:
+                        value = value[field]
+                    self.assertEqual(profile['repositories']['application']['ssh'], value)
+                for key in ('APP_REPOSITORY_URL', 'CI_SCM_CREDENTIAL_ID'):
+                    shadowed = source.replace('environment {', f"environment {{\n        {key} = 'fixture-static'", 1)
+                    with self.assertRaises(AssertionError):
+                        assert_no_shadowing(shadowed)
+
     def test_delivery_preflight_runs_before_build_for_all_packaging_pipelines(self):
         for name in (*DELIVERY_JOBS, 'ohos.test'):
             with self.subTest(name=name):
