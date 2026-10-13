@@ -1,0 +1,8 @@
+Mobile CI toolkit
+Copyright 2026 山西瀚宁网络科技有限公司 and contributors.
+
+Original source and documentation are licensed under Apache License 2.0.
+Third-party tools, Jenkins plugins and Apple public certificates retain their
+upstream notices and terms; see THIRD_PARTY.md. No private signing key,
+provisioning profile, runtime credential or company deployment is licensed or
+included by this notice. Company and vendor trademarks are not licensed.
