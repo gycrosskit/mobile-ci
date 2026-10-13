@@ -12,4 +12,4 @@
 私有维护源的[发布流程](发布流程.md)、[仓库接线](仓库接线与切换.md)、[模板兼容](模板扩展.md)、
 [Linux runbook](../jenkins/remote/README.md)、[Mac runbook](../jenkins/local/README.md)仍支持现有实例；
 公开导出以中性入口替代公司操作及私有证据，不公开生产材料。
-安全报告见 [SECURITY](../SECURITY.md)。115 UNKNOWN 仍阻断镜像；官方 CLT 已通过隔离运行预检与冷缓存无签名 HAP 构建，签名验收仍待完成。
+安全报告见 [SECURITY](../SECURITY.md)。115 UNKNOWN 仍阻断镜像；官方 CLT 已通过隔离运行预检、冷缓存实际应用 HAP 构建与严格签名验签，设备安装及供应商发行仍须独立验证。
