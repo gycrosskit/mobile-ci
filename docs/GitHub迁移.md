@@ -36,7 +36,8 @@
 ## 源码发行与追溯
 
 `python3 jenkins/export_public_source.py --output build/public-source.tar.gz` 生成无 Git 历史源码包。
-`SOURCE-MANIFEST.json` 绑定每个发行文件的 SHA-256，`SOURCE-ORIGIN.json` 标明源 Commit 和工作树快照。
+导出时生成的 `SOURCE-MANIFEST.json` 绑定该发行包文件的 SHA-256，`SOURCE-ORIGIN.json` 标明源 Commit 和工作树快照。
+本仓库根目录现有两份 JSON 记录初始源码导入，不随后续提交自动更新；当前版本以实际 Git Commit 与文件内容为准。
 未提交内容是否属于该 Commit 必须据快照说明区分。LICENSE、NOTICE、上游声明与安全报告入口保留。
 公司 profile、运维 runbook、生产操作文档和私有验收链接不会随包公开；入口改为通用文档。
 镜像核查的原始实例记录不进入包，115 UNKNOWN 仍阻断镜像发行。
