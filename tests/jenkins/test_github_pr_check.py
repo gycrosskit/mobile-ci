@@ -242,7 +242,7 @@ class GitHubPrCheckTest(unittest.TestCase):
         self.assertEqual('example/mobile-automation', trusted['repository'])
         self.assertEqual('a' * 40, trusted['ref'])
         policy = workflow_checks.GitHubWorkflowExamplesTest()
-        policy.assert_safe(reusable, reusable=True)
+        policy.assert_safe(reusable, reusable=True, application=True)
         for mutate in (lambda w: w['permissions'].update(contents='write'),
                        lambda w: w['on'].update(pull_request_target={}),
                        lambda w: w['jobs']['application-pr'].update(**{'runs-on': 'self-hosted'}),
@@ -250,7 +250,7 @@ class GitHubPrCheckTest(unittest.TestCase):
                        lambda w: w['jobs']['application-pr']['steps'][0].update(uses='actions/checkout@main'),
                        lambda w: w['jobs']['application-pr']['steps'][-1].update(run='${{ inputs.command }}')):
             bad = copy.deepcopy(reusable); mutate(bad)
-            with self.assertRaises(AssertionError): policy.assert_safe(bad, reusable=True)
+            with self.assertRaises(AssertionError): policy.assert_safe(bad, reusable=True, application=True)
 
 
 if __name__ == '__main__':

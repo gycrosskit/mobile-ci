@@ -35,12 +35,12 @@ class GitHubWorkflowExamplesTest(unittest.TestCase):
         self.caller = read_workflow(EXAMPLES / "check.yml")
         self.reusable = read_workflow(EXAMPLES / "reusable-check.yml")
 
-    def assert_safe(self, workflow, *, reusable=False):
+    def assert_safe(self, workflow, *, reusable=False, application=False):
         self.assertEqual({"contents": "read"}, workflow["permissions"])
         self.assertEqual({"workflow_call"} if reusable else {"pull_request", "workflow_dispatch"}, set(workflow["on"]))
         self.assertNotIn("secrets.", json.dumps(workflow))
         if reusable:
-            self.assertEqual({"public-check", "native-preflight"}, set(workflow["jobs"]))
+            self.assertEqual({"application-pr"} if application else {"public-check", "native-preflight"}, set(workflow["jobs"]))
         for name, job in workflow["jobs"].items():
             self.assertEqual({"contents": "read"}, job.get("permissions", workflow["permissions"]))
             self.assertEqual({}, job.get("secrets", {}))
