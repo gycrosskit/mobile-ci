@@ -1,0 +1,58 @@
+name: Trusted application PR
+'on':
+  workflow_call:
+    inputs:
+      project-id:
+        required: true
+        type: string
+    secrets: {}
+permissions:
+  contents: read
+jobs:
+  application-pr:
+    name: Application contract and Android Debug
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI_PROJECT_ID: ${{ inputs.project-id }}
+      CI_EXPECTED_SHA: '__CI_SHA__'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout reviewed tools
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: __CI_REPOSITORY__
+          ref: '__CI_SHA__'
+          path: trusted-ci
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11.9'
+      - name: Validate GitHub event before application checkout
+        id: event
+        shell: bash
+        run: python3 trusted-ci/jenkins/github_pr_check.py event --project "$CI_PROJECT_ID" >> "$GITHUB_OUTPUT"
+      - name: Checkout PR head from base repository PR ref
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ steps.event.outputs.repository }}
+          ref: ${{ steps.event.outputs.head_ref }}
+          path: candidate-app
+          persist-credentials: false
+      - name: Checkout event base commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ steps.event.outputs.repository }}
+          ref: ${{ steps.event.outputs.base_sha }}
+          path: base-app
+          persist-credentials: false
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: temurin
+          java-version: '17.0.16+8'
+      - name: Run trusted contract and native build checks
+        shell: bash
+        run: >-
+          python3 trusted-ci/jenkins/github_pr_check.py check
+          --project "$CI_PROJECT_ID" --ci-sha "$CI_EXPECTED_SHA"
+          --app-root "$GITHUB_WORKSPACE/candidate-app" --base-root "$GITHUB_WORKSPACE/base-app"

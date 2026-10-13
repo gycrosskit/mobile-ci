@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# 示例使用管理员预装 Gradle，不伪造 wrapper 或下载未核验二进制。
+command -v gradle >/dev/null || { echo '缺少 Gradle；请安装兼容 AGP 8.9.2 的 Gradle 8.x（至少 8.11.1）。' >&2; exit 2; }
+exec gradle "$@"

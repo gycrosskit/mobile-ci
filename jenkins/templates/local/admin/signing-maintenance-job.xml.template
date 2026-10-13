@@ -1,0 +1,103 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions />
+  <description>集中查询入口：使用默认 inventory / plan 构建，打开构建归档的 build/signing-inventory/index.html，查看全部品牌的团队、证书、Profile、有效期和脱敏测试设备。新品牌接入：选择 ios 或 harmony、onboard、目标品牌；DEVICE_SOURCE=shared 默认复用该平台已有批准设备，DEVICE_IDS=all 或填写查询页中的设备 ID。手动新增手机时选择 manual 并填写名称和 UDID。证书和私钥按开发者团队保存，Profile 按品牌应用维护；同一手机在不同团队分别登记。接入与设备同步先 plan，再由管理员确认 apply。查询不会修改 Apple/华为后台，不编译或上传安装包，不展示私钥、密码或完整 UDID。</description>
+  <displayName>签名与设备维护</displayName>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.security.AuthorizationMatrixProperty plugin="matrix-auth">
+      <inheritanceStrategy class="org.jenkinsci.plugins.matrixauth.inheritance.NonInheritingStrategy" />
+    </hudson.security.AuthorizationMatrixProperty>
+    <jenkins.model.BuildDiscarderProperty>
+      <strategy class="hudson.tasks.LogRotator">
+        <daysToKeep>30</daysToKeep>
+        <numToKeep>30</numToKeep>
+        <artifactDaysToKeep>7</artifactDaysToKeep>
+        <artifactNumToKeep>5</artifactNumToKeep>
+        <removeLastBuild>false</removeLastBuild>
+      </strategy>
+    </jenkins.model.BuildDiscarderProperty>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>PLATFORM</name>
+          <description>集中查询展示 Android、iOS、HarmonyOS 全部品牌；接入或设备同步须选择 ios 或 harmony。两个平台的设备池和签名材料分别维护。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>all</string>
+              <string>ios</string>
+              <string>harmony</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>OPERATION</name>
+          <description>inventory：集中查询全部品牌、签名有效期与测试设备；onboard：首次品牌接入，可复用公共设备池；devices：将公共设备或手动新增设备同步到所选品牌 Profile。后台结果未知时保留恢复状态并停止。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>inventory</string>
+              <string>onboard</string>
+              <string>devices</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>MODE</name>
+          <description>plan：查询或预览，不修改 Apple/华为后台；apply：创建缺项、登记设备、更新 Profile 并同步材料。inventory 只允许 plan。设备池缓存保存在受限签名目录。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>plan</string>
+              <string>apply</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>TARGET_BRANDS</name>
+          <description>inventory 始终查询全部品牌。接入或设备同步填写品牌 ID，例如 cihang；多个品牌以英文逗号分隔，后台按各品牌所属团队处理。接入或同步的 all 仅适用于该平台全部品牌配置均已确认时。</description>
+          <defaultValue>all</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>DEVICE_SOURCE</name>
+          <description>shared：复用查询页中的已批准测试设备，首次接入无需重复填写 UDID；manual：手动新增一台手机，须填写下方名称与 UDID。inventory 忽略此参数。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>shared</string>
+              <string>manual</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>DEVICE_IDS</name>
+          <description>shared 的设备选择：all 复用该平台全部已批准设备；或填写查询页中的设备 ID，以英文逗号分隔。iOS 与鸿蒙设备不可混用。manual 保持 all，不与指定设备 ID 混填；inventory 忽略此参数。</description>
+          <defaultValue>all</defaultValue>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>DEVICE_NAME</name>
+          <description>仅 DEVICE_SOURCE=manual 时填写测试手机名称，并同时填写 DEVICE_UDID。shared 从受限设备池读取，禁止混填。</description>
+          <defaultValue />
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.PasswordParameterDefinition>
+          <name>DEVICE_UDID</name>
+          <description>仅 DEVICE_SOURCE=manual 时填写手机 UDID，与名称配对。shared 无需再次提供。完整值不进入日志或归档。</description>
+          <defaultValue />
+        </hudson.model.PasswordParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>CONFIRM_APPLY</name>
+          <description>确认所选品牌、Team 和供应商写入范围。</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>NOTIFY</name>
+          <description>维护入口固定为 false，不发送通知。</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>__SIGNING_MAINTENANCE_PIPELINE__</script>
+    <sandbox>false</sandbox>
+  </definition>
+  <triggers />
+  <disabled>false</disabled>
+</flow-definition>

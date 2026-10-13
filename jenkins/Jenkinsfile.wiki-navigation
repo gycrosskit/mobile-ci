@@ -1,0 +1,74 @@
+def ciProject = null
+pipeline {
+    agent { label 'pr-builder' }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 5, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        timestamps()
+    }
+
+    triggers {
+        pollSCM('H/2 * * * *')
+        // SCM 轮询不会重跑同一提交的失败任务，定时幂等发布补齐故障恢复。
+        cron('H/15 * * * *')
+    }
+
+    stages {
+        stage('Checkout tools and application') {
+            steps {
+                dir('automation') {
+                    script {
+                        def tools = checkout(changelog: false, poll: false, scm: scm)
+                        env.CI_AUTOMATION_COMMIT = tools.GIT_COMMIT
+                        env.CI_TOOL_ROOT = pwd()
+                        env.PYTHONPATH = env.CI_TOOL_ROOT
+                        def projectJson = sh(script: 'python3 "$CI_TOOL_ROOT/project_config.py" --job "$JOB_NAME" --role wiki', returnStdout:true).trim()
+                        ciProject = new groovy.json.JsonSlurperClassic().parseText(projectJson)
+                        env.CI_PROJECT_ID = ciProject.id
+                        env.CI_DEFAULT_BRANCH = ciProject.repositories.application.defaultBranch
+                        env.CI_SCM_CREDENTIAL_ID = ciProject.credentials.scm
+                    }
+                }
+                dir('source') {
+                    checkout(changelog: true, poll: true, scm: [
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/heads/${env.CI_DEFAULT_BRANCH}"]],
+                        userRemoteConfigs: [[url: ciProject.repositories.application.ssh, credentialsId: env.CI_SCM_CREDENTIAL_ID]]
+                    ])
+                    script {
+                        env.APP_SOURCE_ROOT = pwd()
+                        env.CI_TOOL_ROOT = "${env.WORKSPACE}/automation"
+                        env.PYTHONPATH = env.CI_TOOL_ROOT
+                        env.CI_APP_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        echo "CI ${env.CI_AUTOMATION_COMMIT}; application ${env.CI_APP_COMMIT}"
+                    }
+                }
+            }
+        }
+        stage('Validate navigation') {
+            steps {
+                dir('automation') {
+                    sh 'python3 -m unittest tests.jenkins.test_sync_wiki_navigation'
+                }
+            }
+        }
+        stage('Update Wiki homepage') {
+            steps {
+                dir('source') {
+                  retry(2) {
+                    withCredentials([sshUserPrivateKey(credentialsId: env.CI_SCM_CREDENTIAL_ID, keyFileVariable: 'WIKI_SSH_KEY')]) {
+                        sh '''
+                        set +x
+                        export GIT_SSH_COMMAND="ssh -i \\"$WIKI_SSH_KEY\\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+                        python3 "$CI_TOOL_ROOT/jenkins/sync_wiki_navigation.py" --repo "$APP_SOURCE_ROOT" --publish
+                        '''
+                    }
+                  }
+                }
+            }
+        }
+    }
+}

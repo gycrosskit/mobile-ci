@@ -1,0 +1,407 @@
+def ciFailureStage = 'Pipeline Initialization'
+def ciProject = null
+def ciUnstableStage = null
+
+pipeline {
+    // Android 构建固定由远端 Linux Agent 执行，避免重新占用 Mac 发布节点。
+    agent { label 'android-builder' }
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(
+            daysToKeepStr: '180',
+            numToKeepStr: '50',
+            artifactDaysToKeepStr: '180',
+            artifactNumToKeepStr: '20'
+        ))
+        timeout(time: 90, unit: 'MINUTES')
+    }
+
+    environment {
+        CI_OUTPUT_DIR = 'build/ci'
+        APP_REPOSITORY_URL = 'git@gitee.com:example/legacy-application.git'
+        CI_FAILURE_STAGE = 'Pipeline Initialization'
+    }
+
+    stages {
+        stage('Validate Delivery Mode') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    if (!(params.UPLOAD_AND_NOTIFY instanceof Boolean) || params.containsKey('DRY_RUN') || params.containsKey('NOTIFY')) {
+                        error '必须使用布尔 UPLOAD_AND_NOTIFY；旧参数或缺少新版表单时拒绝交付'
+                    }
+                    env.CI_DRY_RUN = params.UPLOAD_AND_NOTIFY ? 'false' : 'true'
+                    env.CI_NOTIFY = params.UPLOAD_AND_NOTIFY ? 'true' : 'false'
+                }
+            }
+        }
+        stage('Prepare Notification Runtime') {
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                dir('automation') {
+                    deleteDir()
+                    script {
+                        def automationCheckout = checkout scm
+                        env.CI_AUTOMATION_COMMIT = automationCheckout.GIT_COMMIT
+                        env.CI_TOOL_ROOT = pwd()
+                        env.APP_SOURCE_ROOT = "${pwd()}/../source"
+                        env.PYTHONPATH = env.CI_TOOL_ROOT
+                        def projectJson = sh(script: 'python3 "$CI_TOOL_ROOT/project_config.py" --job "$JOB_NAME" --role android_release', returnStdout: true).trim()
+                        ciProject = new groovy.json.JsonSlurperClassic().parseText(projectJson)
+                        env.CI_PROJECT_ID = ciProject.id
+                        if (env.CI_NOTIFY == 'true' && (!ciProject.providers.pgyer || !ciProject.providers.dingtalk)) {
+                            error '上传通知模式需要项目固定的蒲公英和钉钉账号绑定'
+                        }
+                        env.CI_BRANDS_FILE = ciProject.contract.brandsFile
+                        env.CI_BUILD_ADAPTER = ciProject.platforms.android.adapter
+                        env.APP_REPOSITORY_URL = ciProject.repositories.application.ssh
+                        env.CI_REPOSITORY_URL = ciProject.repositories.automation.ssh
+                        env.CI_DEFAULT_BRANCH = ciProject.repositories.application.defaultBranch
+                        env.CI_TRUSTED_FACTS_REF = ciProject.repositories.application.trustRef
+                        env.CI_SCM_CREDENTIAL_ID = ciProject.credentials.scm
+                        env.CI_PGYER_CREDENTIAL_ID = ciProject.providers.pgyer?.credentialId ?: ''
+                        env.CI_DINGTALK_WEBHOOK_CREDENTIAL_ID = ciProject.providers.dingtalk?.webhookCredentialId ?: ''
+                        env.CI_DINGTALK_SECRET_CREDENTIAL_ID = ciProject.providers.dingtalk?.secretCredentialId ?: ''
+                        env.CI_DINGTALK_TESTER_CREDENTIAL_ID = ciProject.providers.dingtalk?.testerCredentialId ?: ''
+                    }
+                    sh 'test "$(git rev-parse HEAD)" = "$CI_AUTOMATION_COMMIT"'
+                }
+                // 签名凭据授权仍来自应用master，所选分支只提供构建源码。
+                dir('automation/trusted-application-config') {
+                    deleteDir()
+                    script {
+                        def signingConfigCheckout = checkout([
+                            $class: 'GitSCM', branches: [[name: env.CI_TRUSTED_FACTS_REF]],
+                            extensions: [
+                                [$class: 'CloneOption', depth: 1, noTags: true, shallow: true, timeout: 10],
+                                [$class: 'SparseCheckoutPaths', sparseCheckoutPaths: [[path: env.CI_BRANDS_FILE]]]
+                            ],
+                            userRemoteConfigs: [[credentialsId: env.CI_SCM_CREDENTIAL_ID, url: env.APP_REPOSITORY_URL]]
+                        ])
+                        env.CI_SIGNING_CONFIG_COMMIT = signingConfigCheckout.GIT_COMMIT
+                        env.CI_SIGNING_CONFIG_ROOT = pwd()
+                    }
+                    sh 'test "$(git rev-parse HEAD)" = "$CI_SIGNING_CONFIG_COMMIT" && test -s "$CI_BRANDS_FILE"'
+                }
+            }
+        }
+
+        stage('Validate Parameters') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        env.CI_TAG = (params.GIT_TAG ?: '')
+                            .trim()
+                            .replaceFirst('^refs/tags/', '')
+                        env.CI_BRAND = (params.BRAND ?: '').trim()
+                        env.CI_UI_ENGINE = (params.UI_ENGINE ?: ciProject.platforms.android.engines[0]).trim()
+                        if (!(env.CI_UI_ENGINE in ciProject.platforms.android.engines)) {
+                            error "不支持的 UI 引擎：${env.CI_UI_ENGINE}"
+                        }
+                        // CMP 不传新参数，兼容尚未接入 Kuikly 的历史分支和 Tag。
+                        env.CI_UI_ENGINE_ARGS = env.CI_UI_ENGINE == 'kuikly' ? '--ui-engine=kuikly' : env.CI_UI_ENGINE == 'native' ? '--ui-engine=native' : ''
+                        env.CI_ANDROID_MODULE = ciProject.platforms.android.modules[env.CI_UI_ENGINE]
+                        currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.CI_BRAND} ${env.CI_UI_ENGINE}"
+                        if (!env.CI_BRAND) {
+                            error '请选择构建品牌'
+                        }
+                        if (!env.CI_TAG.startsWith("${env.CI_BRAND}-v")) {
+                            error "Tag ${env.CI_TAG ?: '未选择'} 与品牌 ${env.CI_BRAND} 不匹配"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Checkout Selected Tag') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    deleteDir()
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/tags/${env.CI_TAG}"]],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [],
+                        submoduleCfg: [],
+                        userRemoteConfigs: [[
+                            credentialsId: env.CI_SCM_CREDENTIAL_ID,
+                            refspec: "+refs/heads/${env.CI_DEFAULT_BRANCH}:refs/remotes/origin/${env.CI_DEFAULT_BRANCH} +refs/tags/*:refs/tags/*",
+                            url: env.APP_REPOSITORY_URL
+                        ]]
+                    ])
+                }
+            }
+        }
+
+        stage('Validate Formal Release Target') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def resolvedBrand = sh(
+                            script: 'python3 "$CI_TOOL_ROOT/delivery/release.py" resolve-brand ' +
+                                '--pipeline=release --tag="$CI_TAG"',
+                            returnStdout: true
+                        ).trim()
+                        if (resolvedBrand != env.CI_BRAND) {
+                            error "所选品牌 ${env.CI_BRAND} 与 Tag 品牌 ${resolvedBrand} 不一致"
+                        }
+                    }
+                    sh '''
+                        python3 "$CI_TOOL_ROOT/delivery/release.py" validate \
+                            $CI_UI_ENGINE_ARGS \
+                            --brand="$CI_BRAND" \
+                            --pipeline=release \
+                            --tag="$CI_TAG"
+                        tag_commit="$(git rev-list -n 1 "refs/tags/$CI_TAG")"
+                        if ! git merge-base --is-ancestor "$tag_commit" "origin/$CI_DEFAULT_BRANCH"; then
+                            echo "Tag $CI_TAG points to a commit outside origin/master: $tag_commit" >&2
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Delivery Runtime Preflight') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def dryRunArg = (env.CI_DRY_RUN == 'true') ? ' --dry-run' : ''
+                        sh('python3 "$CI_TOOL_ROOT/delivery/delivery.py" preflight' + dryRunArg)
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        env.R8_OUTPUT_DIR = sh(
+                            script: 'bash "$CI_TOOL_ROOT/delivery/android_ci.sh" mapping-dir "$CI_BRAND" release',
+                            returnStdout: true
+                        ).trim()
+                        env.CI_APK_ARCHIVE_GLOB = sh(script: 'python3 -c \"import os; from project import android_contract; print(android_contract(os.environ[\'CI_BRAND\'], \'release\', os.environ[\'CI_UI_ENGINE\'])[\'outputDir\'] + \'/*.apk\')\"', returnStdout: true).trim()
+                    }
+                    sh '''
+                        bash "$CI_TOOL_ROOT/delivery/android_ci.sh" describe "$CI_BRAND" release
+                        bash "$CI_TOOL_ROOT/delivery/with_linux_build_memory.sh" bash "$CI_TOOL_ROOT/delivery/android_ci.sh" quality-gate "$CI_BRAND" release
+                    '''
+                }
+            }
+        }
+
+        stage('Build APK') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def signingCredentials = sh(
+                            script: 'python3 "$CI_TOOL_ROOT/signing/android_signing.py" credentials ' +
+                                '--config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --brand="$CI_BRAND"',
+                            returnStdout: true
+                        ).trim().readLines()
+                        if (signingCredentials.size() != 2) {
+                            error '所选品牌 Android 签名凭据配置无效'
+                        }
+                        withCredentials([
+                            file(credentialsId: signingCredentials[0], variable: 'ANDROID_KEYSTORE_FILE'),
+                            file(credentialsId: signingCredentials[1], variable: 'ANDROID_SIGNING_CONFIG_FILE')
+                        ]) {
+                            withEnv(['ANDROID_SIGNING_SOURCE=jenkins']) {
+                                sh '''
+                                    set +x
+                                        python3 "$CI_TOOL_ROOT/signing/android_signing.py" build \
+                                            --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" \
+                                            --brand="$CI_BRAND" --pipeline=release --ui-engine="$CI_UI_ENGINE" \
+                                            --output-dir="$CI_OUTPUT_DIR" -- \
+                                            bash "$CI_TOOL_ROOT/delivery/with_linux_build_memory.sh" bash "$CI_TOOL_ROOT/delivery/android_ci.sh" verified-build "$CI_BRAND" release
+                                '''
+                            }
+                        }
+                    }
+                }
+            }
+            post {
+                always {
+                    dir('source') {
+                        archiveArtifacts(
+                            artifacts: "${env.CI_ANDROID_MODULE}/build/reports/lint-results-*.*,build/reports/profile/*.html",
+                            allowEmptyArchive: true
+                        )
+                                        }
+                }
+            }
+        }
+
+        stage('Validate R8 Outputs') {
+            when { expression { ciProject.platforms.android.adapter == 'sxmqlive' || ciProject.platforms.android.mapping != null } }
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        if (!fileExists("${env.R8_OUTPUT_DIR}/mapping.txt")) {
+                            error "R8 mapping missing: ${env.R8_OUTPUT_DIR}/mapping.txt"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Generate Changelog') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        env.CI_COMMIT = sh(
+                            script: 'git rev-parse HEAD',
+                            returnStdout: true
+                        ).trim()
+                        env.CI_BUILDER = env.BUILD_USER_ID ?: env.BUILD_USER ?: 'jenkins'
+                        // 单 Job 会交替构建不同品牌 Tag，不能跨品牌复用上一成功构建的 Commit。
+                        env.CI_LAST_SUCCESS = ''
+                        env.CI_UPDATE_DESCRIPTION = params.UPDATE_DESCRIPTION ?: ''
+                        env.CI_WORK_ITEM_TYPE = params.get('WORK_ITEM_TYPE') ?: ''
+                        env.CI_WORK_ITEM_ID = params.get('WORK_ITEM_ID') ?: ''
+                        env.CI_WORK_ITEM_URL = params.get('WORK_ITEM_URL') ?: ''
+                    }
+                    sh '''
+                        python3 "$CI_TOOL_ROOT/delivery/release.py" prepare \
+                            $CI_UI_ENGINE_ARGS \
+                            --brand="$CI_BRAND" \
+                            --pipeline=release \
+                            --manual-changelog="$CI_UPDATE_DESCRIPTION" \
+                            --last-successful-commit="$CI_LAST_SUCCESS" \
+                            --tag="$CI_TAG" \
+                            --commit="$CI_COMMIT" \
+                            --builder="$CI_BUILDER" \
+                            --work-item-type="$CI_WORK_ITEM_TYPE" \
+                            --work-item-id="$CI_WORK_ITEM_ID" \
+                            --work-item-url="$CI_WORK_ITEM_URL" \
+                            --output-dir="$CI_OUTPUT_DIR"
+                    '''
+                }
+            }
+        }
+
+        stage('Upload To Pgyer') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        if ((env.CI_DRY_RUN == 'true')) {
+                            sh 'python3 "$CI_TOOL_ROOT/delivery/release.py" upload --dry-run'
+                        } else {
+                            withCredentials([
+                                string(
+                                    credentialsId: env.CI_PGYER_CREDENTIAL_ID,
+                                    variable: 'PGYER_API_KEY'
+                                )
+                            ]) {
+                                sh 'python3 "$CI_TOOL_ROOT/delivery/release.py" upload'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Notify DingTalk') {
+            when { expression { env.CI_NOTIFY == 'true' } }
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        if ((env.CI_DRY_RUN == 'true')) {
+                            sh 'python3 "$CI_TOOL_ROOT/delivery/release.py" notify --dry-run'
+                        } else {
+                            catchError(
+                                buildResult: 'UNSTABLE',
+                                stageResult: 'FAILURE'
+                            ) {
+                                withCredentials([
+                                    string(
+                                        credentialsId: env.CI_DINGTALK_WEBHOOK_CREDENTIAL_ID,
+                                        variable: 'DINGTALK_WEBHOOK'
+                                    ),
+                                    string(
+                                        credentialsId: env.CI_DINGTALK_SECRET_CREDENTIAL_ID,
+                                        variable: 'DINGTALK_SECRET'
+                                    )] + (env.CI_DINGTALK_TESTER_CREDENTIAL_ID ? [string(credentialsId: env.CI_DINGTALK_TESTER_CREDENTIAL_ID, variable: 'DINGTALK_TESTER_MOBILE')] : [])) {
+                                    sh 'python3 "$CI_TOOL_ROOT/delivery/release.py" notify'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            post {
+                unsuccessful {
+                    script { ciUnstableStage = env.STAGE_NAME }
+                }
+            }
+        }
+
+        stage('Archive Release Artifacts') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    archiveArtifacts(
+                        artifacts: "${env.CI_APK_ARCHIVE_GLOB},${env.R8_OUTPUT_DIR}/*.txt,build/ci/**",
+                        fingerprint: true
+                    )
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            dir('source') {
+                echo 'Android formal package released successfully.'
+            }
+        }
+        unstable {
+            dir('source') {
+                echo 'APK upload succeeded, but a non-critical release step failed.'
+                script {
+                    if (env.CI_NOTIFY == 'true') {
+                        try {
+                            if (!env.CI_TOOL_ROOT || !fileExists("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy")) {
+                            error 'Trusted CI notification runtime is unavailable'
+                        }
+                        load("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy").send('Android', 'UNSTABLE', ciUnstableStage ?: ciFailureStage)
+                        } catch (Exception ignored) {
+                            echo 'Jenkins unstable notification could not be sent; original result is preserved.'
+                        }
+                    }
+                }
+            }
+        }
+        failure {
+            dir('source') {
+                echo 'Android formal package release failed.'
+                script {
+                    if (env.CI_NOTIFY == 'true') {
+                        try {
+                            if (!env.CI_TOOL_ROOT || !fileExists("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy")) {
+                            error 'Trusted CI notification runtime is unavailable'
+                        }
+                        load("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy").send('Android', 'FAILURE', ciFailureStage)
+                        } catch (Exception ignored) {
+                            echo 'Jenkins failure notification could not be sent; original result is preserved.'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

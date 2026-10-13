@@ -1,0 +1,12 @@
+# 统一 Android/OHOS 节点必须显式选择管理员已核验的 Android 基础，不降级为纯鸿蒙镜像。
+ARG OHOS_AGENT_BASE_IMAGE
+FROM ${OHOS_AGENT_BASE_IMAGE}
+USER root
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends openssl perl libatomic1 libxml2 libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY clt.py /usr/local/lib/ohos/clt.py
+COPY start-ohos-agent.sh /usr/local/bin/start-ohos-agent
+RUN chmod 0755 /usr/local/bin/start-ohos-agent
+USER jenkins
+ENTRYPOINT ["/usr/local/bin/start-ohos-agent"]

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sxmqlive.jenkins-pr-agent</string>
+    <key>UserName</key>
+    <string>__SERVICE_USER__</string>
+    <!-- 服务账号的临时签名钥匙串需要独立 Security Session。 -->
+    <key>SessionCreate</key>
+    <true/>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__INSTALL_ROOT__/run-agent.sh</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__SERVICE_HOME__</string>
+        <key>JENKINS_URL</key>
+        <string>__JENKINS_URL__</string>
+        <key>JENKINS_AGENT_NAME</key>
+        <string>mac-build</string>
+        <key>JENKINS_AGENT_WORK_DIR</key>
+        <string>__AGENT_WORK_DIR__</string>
+        <key>DELIVERY_STATE_ROOT</key>
+        <string>__AGENT_WORK_DIR__/delivery-state</string>
+        <key>JENKINS_AGENT_SECRET_FILE</key>
+        <string>__INSTALL_ROOT__/runtime/agent.secret</string>
+        <key>ANDROID_HOME</key>
+        <string>__ANDROID_SDK_ROOT__</string>
+        <key>ANDROID_SDK_ROOT</key>
+        <string>__ANDROID_SDK_ROOT__</string>
+        <key>GRADLE_USER_HOME</key>
+        <string>__GRADLE_USER_HOME__</string>
+        <key>JAVA_HOME</key>
+        <string>__JAVA_HOME__</string>
+        <key>DEVELOPER_DIR</key>
+        <string>__DEVELOPER_DIR__</string>
+        <key>FASTLANE_RUBY</key>
+        <string>__RUBY_BIN__</string>
+        <key>FASTLANE_GEM_HOME</key>
+        <string>__FASTLANE_GEM_HOME__</string>
+        <key>PATH</key>
+        <string>__TOOL_PATH__</string>
+        <key>LANG</key>
+        <string>en_US.UTF-8</string>
+        <key>LC_ALL</key>
+        <string>en_US.UTF-8</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ProcessType</key>
+    <string>Standard</string>
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/stderr.log</string>
+</dict>
+</plist>

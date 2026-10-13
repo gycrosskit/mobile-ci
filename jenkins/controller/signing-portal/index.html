@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>签名与设备</title>
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主内容</a>
+  <div class="workspace">
+    <header class="topbar">
+      <a class="wordmark" href="./">签名与设备</a>
+      <nav class="entries glass" aria-label="管理入口">
+        <button type="button" data-view="devices" aria-current="page">查看设备</button>
+        <button type="button" data-view="add">新增设备</button>
+        <button type="button" data-view="signatures">查看签名</button>
+      </nav>
+      <a id="jenkins-link" href="../">Jenkins ↗</a>
+    </header>
+    <main id="main" tabindex="-1">
+      <div class="intro"><div><h1 id="page-title">查看设备</h1><p id="page-description">查看已批准共享的测试设备，按品牌复用设备。</p></div><button id="refresh" type="button" disabled><span aria-hidden="true">↻</span> 刷新台账</button></div>
+      <div id="device-overview" class="overview"><p><strong id="ios-count">—</strong> iOS 设备</p><p><strong id="harmony-count">—</strong> 鸿蒙设备</p></div>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section id="task" class="task" aria-label="任务进度" aria-live="polite" hidden></section>
+      <div class="toolbar"><fieldset id="platform-picker" class="platform"><legend class="sr-only">平台</legend><label id="android-platform" hidden><input type="radio" name="platform" value="android"><span>Android</span></label><label><input type="radio" name="platform" value="ios" checked><span>iOS</span></label><label><input type="radio" name="platform" value="harmony"><span>鸿蒙</span></label></fieldset><label id="search-label" class="search"><span class="sr-only">搜索设备或品牌</span><input id="search" type="search" placeholder="搜索设备或品牌" maxlength="100"></label><button id="sync-all" type="button" disabled>一键同步全部 iOS 设备</button><button class="primary" id="go-add" type="button">新增设备</button></div>
+      <section id="add-view" aria-labelledby="add-title" hidden>
+        <h2 id="add-title" class="sr-only">新增设备</h2>
+        <ol class="steps" aria-label="新增设备步骤"><li data-step="1" aria-current="step">01 获取设备</li><li data-step="2">02 选择品牌</li><li data-step="3">03 确认</li></ol>
+        <div id="form-platform"></div>
+        <div id="identified" class="identified" hidden><span id="identified-label"></span><button id="switch-platform" class="text-button" type="button">切换平台</button></div>
+        <section id="acquire-view" class="panel" aria-labelledby="acquire-title">
+          <h2 id="acquire-title">要添加哪种设备？</h2>
+          <p id="acquire-description">iOS 用手机获取，鸿蒙连接研发电脑读取。</p>
+          <div id="choose-platform" class="choice-actions"><button class="primary" type="button" data-platform="ios">iOS 设备</button><button type="button" data-platform="harmony">鸿蒙设备</button></div>
+          <div id="capture-actions" hidden><button id="capture-start" class="primary" type="button">读取设备</button></div>
+          <div id="capture-guide" hidden><ol id="guide-steps" class="guide-steps"></ol><div id="wireless-field" hidden><label>IP 地址和端口<input id="capture-target" type="text" inputmode="url" maxlength="22" placeholder="例如 192.168.1.20:37143" autocomplete="off" spellcheck="false"></label><p class="hint">填写已连接研发电脑的设备地址，连接地址不是 UDID。</p></div><button id="capture-read" class="primary" type="button">连接后读取</button><button id="wireless-toggle" class="text-button" type="button">没有数据线？使用无线连接</button></div>
+          <p id="capture-status" role="status" aria-live="polite" hidden></p>
+        </section>
+        <div id="acquire-links" class="acquire-links"><button id="existing-device" class="text-button" type="button">已经添加过？从已有设备选择</button><button id="manual-entry" class="text-button muted" type="button">其他方式：手动填写 UDID</button></div>
+        <form id="device-form" class="panel" autocomplete="off" novalidate hidden>
+          <div id="device-step"><h2 id="device-form-title">设备信息</h2><div class="fields"><label>设备名称<input id="device-name" name="name" required maxlength="80" placeholder="例如：研发测试机" autocomplete="off"></label><label>设备 UDID<input id="device-udid" name="udid" required maxlength="128" placeholder="粘贴设备 UDID" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="udid-help"></label></div><p id="udid-help" class="hint">仅用于本次操作，不保存在浏览器中。</p><button id="capture-again" class="text-button" type="button">重新获取设备信息</button></div>
+          <div id="brand-step" hidden><fieldset class="brand-fieldset"><legend>选择需要使用此设备的品牌</legend><div id="add-brands" class="brand-options"></div></fieldset><p id="add-excluded" class="hint"></p><p class="hint">同一团队的选中品牌会一并核对。</p></div>
+          <div id="review-step" hidden><h3>核对本次新增</h3><div id="add-review" class="review-summary"></div><p class="hint">检查通过后会显示确认窗口。点击“确认并执行”才会更新设备与签名。</p></div>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+          <div class="form-footer"><span id="step-progress" class="hint">第 1 步，共 3 步</span><div class="form-actions"><button id="add-back" type="button" hidden>上一步</button><button id="preview-add" class="primary" type="submit" disabled>下一步：选择品牌</button></div></div>
+        </form>
+      </section>
+      <section id="devices-view" aria-labelledby="devices-title"><div class="section-heading"><div><h2 id="devices-title">已有设备</h2><p id="devices-count"></p></div><span class="hint">设备标识已隐藏</span></div><div class="device-table-heading" aria-hidden="true"><span>设备</span><span>来源品牌</span><span>操作</span></div><div id="device-list" class="device-list"></div></section>
+      <section id="signatures-view" hidden aria-labelledby="signatures-title"><div class="section-heading"><div><h2 id="signatures-title">品牌签名</h2><p>依据最近台账显示三端证书及归属；Android 签名不需要设备白名单。</p></div></div><div id="signature-list" class="cards"></div></section>
+      <footer><p>确认前不会登记设备或更新签名。同步设备后需重新出包。</p><div class="meta"><span id="updated">台账尚未加载</span><span id="user">正在连接 Jenkins</span><span id="access"></span></div><div class="meta"><span>签名备份：<span id="backup-status" role="status">暂无备份</span></span><span id="backup-time"></span><a href="#backup-status" target="_blank" rel="noopener noreferrer">备份记录</a></div></footer>
+    </main>
+  </div>
+  <dialog id="platform-dialog" aria-labelledby="platform-title"><h2 id="platform-title">切换设备平台</h2><p class="hint">仅在自动识别有误时使用。</p><button type="button" class="primary" data-platform="ios">iPhone / iPad</button><button type="button" data-platform="harmony">鸿蒙手机</button><button type="button" class="text-button" data-close="platform-dialog">取消</button></dialog>
+  <dialog id="sync-dialog" aria-labelledby="sync-title"><form id="sync-form"><div class="dialog-heading"><h2 id="sync-title">同步到其他品牌</h2><button class="icon-button" type="button" data-close="sync-dialog" aria-label="关闭">×</button></div><p id="sync-device"></p><fieldset class="brand-fieldset"><legend>选择需要使用此设备的品牌</legend><div id="sync-brands" class="brand-options"></div></fieldset><p id="sync-excluded" class="hint"></p><div class="dialog-actions"><button type="button" data-close="sync-dialog">取消</button><button class="primary" id="preview-sync" type="submit">检查影响范围</button></div></form></dialog>
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title"><div class="dialog-heading"><h2 id="confirm-title">确认更新设备与签名</h2><button class="icon-button" type="button" data-close="confirm-dialog" aria-label="关闭">×</button></div><p>检查已通过，请确认以下品牌和团队。</p><div id="confirm-summary"></div><p class="hint">执行后会更新设备名单与测试签名。完成后需重新出包。</p><div class="dialog-actions"><button type="button" data-close="confirm-dialog">取消</button><button id="apply" class="primary" type="button">确认并执行</button></div></dialog>
+</body>
+</html>

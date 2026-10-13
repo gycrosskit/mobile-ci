@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "id": "sxmqlive",
+  "repositories": {
+    "application": {
+      "identity": "example/legacy-application",
+      "ssh": "git@gitee.com:example/legacy-application.git",
+      "https": "https://gitee.com/example/legacy-application.git",
+      "defaultBranch": "master",
+      "trustRef": "refs/heads/master"
+    },
+    "automation": {
+      "identity": "example/legacy-automation",
+      "ssh": "git@gitee.com:example/legacy-automation.git",
+      "https": "https://gitee.com/example/legacy-automation.git",
+      "defaultBranch": "master",
+      "trustRef": "refs/heads/master"
+    }
+  },
+  "credentials": {
+    "scm": "fixture-scm",
+    "giteeApi": "fixture-giteeApi",
+    "giteeWebhook": "fixture-giteeWebhook",
+    "giteeConnection": "fixture-giteeConnection"
+  },
+  "providers": {
+    "pgyer": {
+      "accountId": "fixture-pgyer-accountid",
+      "credentialId": "fixture-pgyer-credentialid",
+      "legacyNamespace": false
+    },
+    "dingtalk": {
+      "accountId": "fixture-dingtalk-accountid",
+      "webhookCredentialId": "fixture-dingtalk-webhookcredentialid",
+      "secretCredentialId": "fixture-dingtalk-secretcredentialid",
+      "testerCredentialId": "fixture-dingtalk-testercredentialid",
+      "legacyNamespace": false
+    }
+  },
+  "platforms": {
+    "android": {
+      "adapter": "sxmqlive",
+      "engines": [
+        "cmp",
+        "kuikly"
+      ],
+      "modules": {
+        "cmp": "app",
+        "kuikly": "androidKuiklyApp"
+      },
+      "buildTypes": {
+        "test": "Qa",
+        "release": "Release"
+      }
+    },
+    "ios": {
+      "adapter": "sxmqlive",
+      "engines": [
+        "cmp",
+        "kuikly"
+      ],
+      "hostDirs": {
+        "cmp": "iosApp",
+        "kuikly": "iosKuiklyApp"
+      }
+    },
+    "harmony": {
+      "adapter": "sxmqlive",
+      "engines": [
+        "cmp",
+        "kuikly"
+      ],
+      "module": "ohosApp/entry"
+    }
+  },
+  "jobs": {
+    "android_test": {
+      "name": "mobile-apps/sxmqlive-android-test",
+      "pipeline": "jenkins/Jenkinsfile.test"
+    },
+    "android_release": {
+      "name": "mobile-apps/sxmqlive-android-formal-release",
+      "pipeline": "jenkins/Jenkinsfile.release"
+    },
+    "ios_test": {
+      "name": "mobile-apps/sxmqlive-ios-test",
+      "pipeline": "jenkins/Jenkinsfile.ios.test"
+    },
+    "ios_release": {
+      "name": "mobile-apps/sxmqlive-ios-formal-release",
+      "pipeline": "jenkins/Jenkinsfile.ios.release"
+    },
+    "harmony_test": {
+      "name": "mobile-apps/sxmqlive-ohos-test",
+      "pipeline": "jenkins/Jenkinsfile.ohos.test"
+    },
+    "harmony_release": {
+      "name": "mobile-apps/sxmqlive-ohos-formal-release",
+      "pipeline": "jenkins/Jenkinsfile.ohos.test"
+    },
+    "app_pr": {
+      "name": "sxmqlive-pr-validation",
+      "pipeline": "jenkins/Jenkinsfile.pr-validation"
+    },
+    "ci_pr": {
+      "name": "sxmqlive-ci-pr-validation",
+      "pipeline": "jenkins/Jenkinsfile.ci-pr-validation"
+    },
+    "wiki": {
+      "name": "运维/sxmqlive-wiki-navigation",
+      "pipeline": "jenkins/Jenkinsfile.wiki-navigation"
+    },
+    "signing_maintenance": {
+      "name": "mobile-apps/sxmqlive-signing-maintenance",
+      "pipeline": "jenkins/Jenkinsfile.signing.maintenance"
+    },
+    "signing_backup": {
+      "name": "运维/sxmqlive-signing-backup",
+      "pipeline": "jenkins/Jenkinsfile.signing.backup"
+    },
+    "alert": {
+      "name": "运维/Jenkins 失败告警验收",
+      "pipeline": "jenkins/Jenkinsfile.alert-test"
+    }
+  },
+  "contract": {
+    "toolDir": "ci/scripts",
+    "testDir": "ci/tests",
+    "brandsFile": "ci/brands.json",
+    "manifestTest": "test_manifest_contract.py",
+    "buildSystem": "gradle"
+  },
+  "runtime": {
+    "roles": {
+      "controller": "controller",
+      "android": "android-agent",
+      "pr": "pr-agent",
+      "maintenance": "ohos-maintenance"
+    },
+    "linuxUid": 1000,
+    "macUid": 502
+  },
+  "backup": {
+    "scope": "controller",
+    "recipientAuthority": "controller-admin",
+    "repository": "application",
+    "branch": "backup/signing"
+  },
+  "signingBackup": {
+    "scope": "controller_dr",
+    "node": "signing-maintenance",
+    "root": "/home/jenkins/signing",
+    "recipientPath": "signing/backups/recipient-public.pem",
+    "recipientSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "repository": "application",
+    "branch": "backup/signing",
+    "prefixes": []
+  },
+  "portal": {
+    "macNode": "mac-build",
+    "hdcPath": "/opt/fixture/hdc",
+    "backupUrl": "https://gitee.com/example/legacy-application/tree/backup/signing"
+  },
+  "testOnly": true
+}

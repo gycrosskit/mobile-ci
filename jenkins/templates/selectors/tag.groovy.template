@@ -1,0 +1,44 @@
+import net.uaznia.lukanus.hudson.plugins.gitparameter.GitParameterDefinition
+import net.uaznia.lukanus.hudson.plugins.gitparameter.SelectedValue
+import net.uaznia.lukanus.hudson.plugins.gitparameter.jobs.JobWrapperFactory
+import jenkins.model.Jenkins
+
+def jobName = '__JOB_NAME__'
+// 品牌白名单由 generate_jenkins_job_templates.py 生成，避免参数页和 ci/brands.json 漂移。
+def allowedBrands = [__ALLOWED_BRANDS__]
+def brand = '__DEFAULT_BRAND__'
+try {
+    brand = BRAND?.toString() ?: brand
+} catch (MissingPropertyException ignored) {
+    // 首次渲染参数页时，Active Choices 可能尚未注入引用参数。
+}
+if (!allowedBrands.contains(brand)) {
+    return ['请先选择品牌:selected']
+}
+def job = Jenkins.get().getItemByFullName(jobName)
+if (job == null) {
+    return ['正式任务不存在:selected']
+}
+job.checkPermission(hudson.model.Item.BUILD)
+def parameter = new GitParameterDefinition(
+    'DISCOVERED_TAG',
+    'PT_TAG',
+    '',
+    '',
+    null,
+    '.*',
+    '*',
+    null,
+    SelectedValue.NONE,
+    '{{CI_APP_REPO_PATTERN}}',
+    false
+)
+def wrapper = JobWrapperFactory.createJobWrapper(job)
+def scm = new hudson.plugins.git.GitSCM(
+    [new hudson.plugins.git.UserRemoteConfig('{{CI_APP_SSH}}', 'origin', '+refs/heads/*:refs/remotes/origin/*', '{{CI_CREDENTIAL_SCM}}')],
+    [], null, null, []
+)
+def tags = parameter.generateContents(wrapper, [scm]).values.collect { org.biouno.unochoice.util.SafeHtmlExtendedMarkupFormatter.INSTANCE.translate(it.value.toString()) }
+def prefix = "${brand}__TAG_SUFFIX__"
+return tags.findAll { it.startsWith(prefix) }.sort().reverse() ?:
+    ['__EMPTY_TAG_MESSAGE__']

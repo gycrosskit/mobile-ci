@@ -1,0 +1,180 @@
+def ciFailureStage = 'Pipeline Initialization'
+def ciContextValidated = false
+
+// 同仓库 Webhook 可覆盖 SCM 检出版本，门禁必须部署固定文本，禁止加载 MR Jenkinsfile。
+pipeline {
+    agent { label 'pr-builder && !ios-pr-builder' }
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 15, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '80'))
+        timestamps()
+    }
+    environment {
+        CI_PROJECT_ID = '{{CI_PROJECT_ID}}'
+        CI_REPOSITORY_URL = '{{CI_CI_SSH}}'
+        APP_REPOSITORY_URL = '{{CI_APP_SSH}}'
+        CI_AUTOMATION_COMMIT = '__CI_AUTOMATION_COMMIT__'
+        NOTIFY = 'false'
+    }
+    stages {
+        stage('Validate Webhook Context') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    if (!(env.giteePullRequestIid ==~ /[1-9][0-9]*/)) {
+                        error('缺少合法的 giteePullRequestIid；本任务只接受 Gitee Pull Request Webhook。')
+                    }
+                    if (env.giteeTargetBranch != '{{CI_ROLE_BRANCH}}') {
+                        error('MR 目标分支必须是 master。')
+                    }
+                    def context = new groovy.json.JsonSlurperClassic().parseText(env.jsonBody ?: '{}')
+                    // Gitee 插件回填评论使用 repo，缺失时使用 pull_request.base.repo。
+                    def commentRepository = context.repo != null ? context.repo?.path_with_namespace : context.pull_request?.base?.repo?.path_with_namespace
+                    def repositoryIdentities = [commentRepository, context.repository?.path_with_namespace].findAll { it != null }
+                    if (commentRepository != '{{CI_CI_IDENTITY}}' || repositoryIdentities.any { it != '{{CI_CI_IDENTITY}}' } ||
+                        env.giteeTargetNamespace != '{{CI_ROLE_NAMESPACE}}' ||
+                        !(env.giteeTargetRepoSshUrl == env.CI_REPOSITORY_URL || env.giteeTargetRepoHttpUrl in [
+                            '{{CI_CI_WEB}}',
+                            '{{CI_CI_HTTPS}}'])) {
+                        error('Webhook 必须来自固定 CI 仓库；拒绝其他仓库或缺失身份的请求。')
+                    }
+                    if (!(env.giteePullRequestLastCommit ==~ /[0-9a-f]{40}/)) {
+                        error('缺少合法 MR 预合并提交。')
+                    }
+                    def headSha = context.pull_request?.head?.sha
+                    if (!(headSha instanceof String) || !(headSha ==~ /[0-9a-f]{40}/)) {
+                        error('缺少合法 MR 源提交。')
+                    }
+                    env.CI_EXPECTED_HEAD = headSha
+                    ciContextValidated = true
+                }
+            }
+        }
+        stage('Checkout CI Merge and Application Facts') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    deleteDir()
+                    dir('candidate') {
+                        checkout(changelog: true, poll: false, scm: [
+                            $class: 'GitSCM', branches: [[name: "pull/${env.giteePullRequestIid}/MERGE"]],
+                            doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [],
+                            userRemoteConfigs: [[credentialsId: '{{CI_CREDENTIAL_SCM}}', url: env.CI_REPOSITORY_URL,
+                                refspec: '+refs/heads/{{CI_ROLE_BRANCH}}:refs/remotes/origin/{{CI_ROLE_BRANCH}} +refs/pull/*/MERGE:refs/pull/*/MERGE']]
+                        ])
+                        env.CI_MERGE_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        env.CI_BASE_SHA = sh(script: 'git rev-parse HEAD^1', returnStdout: true).trim()
+                        sh '''
+                            set -eu
+                            test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/pull/$giteePullRequestIid/MERGE")"
+                            git merge-base --is-ancestor "$CI_EXPECTED_HEAD" HEAD
+                            git diff --check "$CI_BASE_SHA"...HEAD
+                        '''
+                    }
+                    dir('application') {
+                        // 首跑没有 SCM 历史，插件附加的无限定修订参数不能用于第二个仓库。
+                        withCredentials([sshUserPrivateKey(credentialsId: '{{CI_CREDENTIAL_SCM}}', keyFileVariable: 'APP_FACTS_SSH_KEY')]) {
+                            sh '''
+                            set +x
+                            set -eu
+                            export GIT_SSH_COMMAND="ssh -i \\"$APP_FACTS_SSH_KEY\\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
+                            git clone --quiet --branch {{CI_APP_BRANCH}} --single-branch "$APP_REPOSITORY_URL" .
+                            '''
+                        }
+                        env.APP_FACTS_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    }
+                    env.CI_TOOL_ROOT = "${pwd()}/candidate"
+                    env.APP_SOURCE_ROOT = "${pwd()}/application"
+                    env.PYTHONPATH = env.CI_TOOL_ROOT
+                    echo "Pipeline ${env.CI_AUTOMATION_COMMIT}; CI merge ${env.CI_MERGE_SHA}; application facts ${env.APP_FACTS_SHA}"
+                }
+            }
+        }
+        stage('Validate CI Test Runtime') {
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                // 缺工具不能变成安全测试 skip；Compose 只解析本地清单，不接触 daemon。
+                sh '''
+                    set -eu
+                    for tool in node ruby docker java; do
+                        command -v "$tool" >/dev/null || {
+                            echo "CI security test runtime is missing: $tool" >&2
+                            exit 1
+                        }
+                    done
+                    expected_groovy=/usr/local/lib/controller-groovy/groovy-all-2.4.21.jar
+                    if [ "${GROOVY_TEST_CLASSPATH:-}" != "$expected_groovy" ] || \
+                       [ ! -f "$expected_groovy" ] || [ -L "$expected_groovy" ] || \
+                       [ ! -r "$expected_groovy" ] || [ -w "$expected_groovy" ]; then
+                        echo "CI security tests require the fixed read-only Controller Groovy jar" >&2
+                        exit 1
+                    fi
+                    node --version
+                    ruby --version
+                    docker compose version --short
+                    java -cp "$GROOVY_TEST_CLASSPATH" groovy.ui.GroovyMain -e "assert GroovySystem.version == '2.4.21'"
+                '''
+            }
+        }
+        stage('CI Behavior and Security Contracts') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    def contractJson = sh(
+                        script: 'python3 "$CI_TOOL_ROOT/jenkins/check_repository_contract.py" --app-root "$APP_SOURCE_ROOT" --project="$CI_PROJECT_ID" --ci-base-ref="$CI_AUTOMATION_COMMIT"',
+                        returnStdout: true
+                    ).trim()
+                    // sh 会暂停并序列化 CPS 状态，解析器必须在 shell 返回后创建。
+                    def contract = new groovy.json.JsonSlurperClassic().parseText(contractJson)
+                    if (contract.ciSha != env.CI_MERGE_SHA || contract.appSha != env.APP_FACTS_SHA || contract.ciDirty || contract.appDirty) {
+                        error('应用/CI 接口证据与实际检出提交不一致，或工作区含未提交内容。')
+                    }
+                    env.APP_TOOL_DIR = contract.toolDir
+                    env.APP_DOCS_CHECK = contract.docsCheck.toString()
+                    echo "Application ${contract.appSha}; CI candidate ${contract.ciSha}; interface ${contract.contractVersion}; docs check ${contract.docsCheck}"
+                }
+                dir('candidate') {
+                    sh '''
+                        set -eu
+                        python3 -m unittest discover -b -s tests -t .
+                        python3 jenkins/generate_jenkins_job_templates.py --project="$CI_PROJECT_ID" --check
+                        if [ "${APP_DOCS_CHECK:-false}" = true ]; then
+                            cd "$APP_SOURCE_ROOT"
+                            python3 "$APP_TOOL_DIR/check_repository_docs.py"
+                        else
+                            echo "历史应用没有文档检查接口；未执行应用文档检查。"
+                        fi
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        success {
+            script {
+                if (ciContextValidated) {
+                    try {
+                        def docsResult = env.APP_DOCS_CHECK == 'true' ? '应用文档检查通过' : '历史应用未执行文档检查'
+                        addGiteeMRComment(comment: "CI 仓库门禁通过：${env.JOB_NAME} #${env.BUILD_NUMBER}。CI merge ${env.CI_MERGE_SHA}；应用事实 ${env.APP_FACTS_SHA}。${docsResult}。应用/CI 接口、CI 文档、测试及 Job 模板契约通过，发布任务仍保持各自固定版本。")
+                    } catch (Exception ignored) {
+                        echo 'Gitee 评论回填失败；保留原门禁结果。'
+                    }
+                }
+            }
+        }
+        failure {
+            script {
+                if (ciContextValidated) {
+                    try {
+                        addGiteeMRComment(comment: "CI 仓库门禁失败：${ciFailureStage}。${env.BUILD_URL}")
+                    } catch (Exception ignored) {
+                        echo 'Gitee 评论回填失败；保留原门禁结果。'
+                    }
+                }
+            }
+        }
+        always { deleteDir() }
+    }
+}

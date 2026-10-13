@@ -1,0 +1,20 @@
+[Unit]
+Description=sxmqlive Jenkins external health monitor
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=CREDENTIALS_DIRECTORY=/etc/sxmqlive-jenkins-monitor
+Environment=STATE_DIRECTORY=/var/lib/sxmqlive-jenkins-monitor
+Environment=JENKINS_MONITOR_URL=__JENKINS_URL__
+ExecStart=/usr/local/libexec/sxmqlive-jenkins-monitor/run-health-monitor-systemd.sh
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,273 @@
+def ciFailureStage = 'Pipeline Initialization'
+def ciProject = null
+def ciUnstableStage = null
+pipeline {
+    agent { label 'linux-build' }
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+        disableConcurrentBuilds()
+        timeout(time: 180, unit: 'MINUTES')
+        buildDiscarder(logRotator(daysToKeepStr: '14', numToKeepStr: '20', artifactNumToKeepStr: '5'))
+    }
+    environment {
+        APP_REPOSITORY_URL = 'git@gitee.com:example/legacy-application.git'
+        GRADLE_USER_HOME = '/home/jenkins/.harmony-gradle'
+        KONAN_DATA_DIR = '/home/jenkins/.harmony-gradle/konan'
+        HARMONY_GRADLE_HEAP_MB = '4096'
+        HARMONY_NODE_HEAP_MB = '1024'
+        NODE_OPTIONS = '--max-old-space-size=1024'
+    }
+    stages {
+        stage('Validate Delivery Mode') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    if (!(params.UPLOAD_AND_NOTIFY instanceof Boolean) || params.containsKey('DRY_RUN') || params.containsKey('NOTIFY')) {
+                        error '必须使用布尔 UPLOAD_AND_NOTIFY；旧参数或缺少新版表单时拒绝交付'
+                    }
+                    env.CI_DRY_RUN = params.UPLOAD_AND_NOTIFY ? 'false' : 'true'
+                    env.CI_NOTIFY = params.UPLOAD_AND_NOTIFY ? 'true' : 'false'
+                }
+            }
+        }
+        stage('Trusted Runtime and Parameters') {
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                dir('automation') {
+                    deleteDir()
+                    script {
+                        def automationCheckout = checkout scm
+                        env.CI_AUTOMATION_COMMIT = automationCheckout.GIT_COMMIT
+                        env.CI_TOOL_ROOT = pwd()
+                        env.APP_SOURCE_ROOT = "${pwd()}/../source"
+                        env.PYTHONPATH = env.CI_TOOL_ROOT
+                        def projectJson = sh(script: 'python3 "$CI_TOOL_ROOT/project_config.py" --job "$JOB_NAME"', returnStdout: true).trim()
+                        ciProject = new groovy.json.JsonSlurperClassic().parseText(projectJson)
+                        env.CI_PROJECT_ID = ciProject.id
+                        if (env.CI_NOTIFY == 'true' && (!ciProject.providers.pgyer || !ciProject.providers.dingtalk)) {
+                            error '上传通知模式需要项目固定的蒲公英和钉钉账号绑定'
+                        }
+                        env.CI_BRANDS_FILE = ciProject.contract.brandsFile
+                        env.CI_BUILD_ADAPTER = ciProject.platforms.harmony.adapter
+                        env.APP_REPOSITORY_URL = ciProject.repositories.application.ssh
+                        env.CI_REPOSITORY_URL = ciProject.repositories.automation.ssh
+                        env.CI_DEFAULT_BRANCH = ciProject.repositories.application.defaultBranch
+                        env.CI_TRUSTED_FACTS_REF = ciProject.repositories.application.trustRef
+                        env.CI_SCM_CREDENTIAL_ID = ciProject.credentials.scm
+                        env.CI_PGYER_CREDENTIAL_ID = ciProject.providers.pgyer?.credentialId ?: ''
+                        env.CI_DINGTALK_WEBHOOK_CREDENTIAL_ID = ciProject.providers.dingtalk?.webhookCredentialId ?: ''
+                        env.CI_DINGTALK_SECRET_CREDENTIAL_ID = ciProject.providers.dingtalk?.secretCredentialId ?: ''
+                        env.CI_DINGTALK_TESTER_CREDENTIAL_ID = ciProject.providers.dingtalk?.testerCredentialId ?: ''
+                    }
+                    sh 'test "$(git rev-parse HEAD)" = "$CI_AUTOMATION_COMMIT"'
+                }
+                script {
+                    env.CI_BRAND = (params.BRAND ?: '').trim()
+                    // Job 身份来自 Jenkins，不能用 API 参数把测试入口切成正式入口。
+                    if (!(env.JOB_NAME in [ciProject.jobs.harmony_test.name, ciProject.jobs.harmony_release.name])) {
+                        error '不支持的 HarmonyOS Job'
+                    }
+                    env.CI_PIPELINE = env.JOB_NAME == ciProject.jobs.harmony_release.name ? 'release' : 'test'
+                    env.CI_BUILD_TYPE = (params.BUILD_TYPE ?: (env.CI_PIPELINE == 'release' ? 'Release' : 'QA')).trim()
+                    if (env.CI_PIPELINE == 'release' ? env.CI_BUILD_TYPE != 'Release' : !(env.CI_BUILD_TYPE in ['QA', 'Debug'])) {
+                        error '鸿蒙测试入口只接受 QA/Debug，正式入口只接受 Release'
+                    }
+                    env.CI_BRANCH = (params.GIT_BRANCH ?: '').trim().replaceFirst('^origin/', '')
+                    env.CI_TAG = (params.GIT_TAG ?: '').trim().replaceFirst('^refs/tags/', '')
+                }
+                // 签名凭据授权仍来自应用master，所选分支只提供构建源码。
+                dir('automation/trusted-application-config') {
+                    deleteDir()
+                    script {
+                        def signingConfigCheckout = checkout([
+                            $class: 'GitSCM', branches: [[name: env.CI_TRUSTED_FACTS_REF]],
+                            extensions: [
+                                [$class: 'CloneOption', depth: 1, noTags: true, shallow: true, timeout: 10],
+                                [$class: 'SparseCheckoutPaths', sparseCheckoutPaths: [[path: env.CI_BRANDS_FILE]]]
+                            ],
+                            userRemoteConfigs: [[credentialsId: env.CI_SCM_CREDENTIAL_ID, url: env.APP_REPOSITORY_URL]]
+                        ])
+                        env.CI_SIGNING_CONFIG_COMMIT = signingConfigCheckout.GIT_COMMIT
+                        env.CI_SIGNING_CONFIG_ROOT = pwd()
+                    }
+                    sh 'test "$(git rev-parse HEAD)" = "$CI_SIGNING_CONFIG_COMMIT" && test -s "$CI_BRANDS_FILE"'
+                }
+
+                script {
+                    def planText = sh(
+                        script: '''python3 "$CI_TOOL_ROOT/delivery/harmony_release.py" plan \
+                            --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --brand="$CI_BRAND" --pipeline="$CI_PIPELINE" --branch="${CI_BRANCH:-}" --tag="${CI_TAG:-}" --build-type="$CI_BUILD_TYPE" --dry-run="$CI_DRY_RUN"''',
+                        returnStdout: true).trim()
+                    def plan = new groovy.json.JsonSlurperClassic().parseText(planText)
+                    env.HARMONY_P12_CREDENTIAL = plan.credentials.p12
+                    env.HARMONY_PASSWORD_CREDENTIAL = plan.credentials.password
+                    env.HARMONY_PROFILE_CREDENTIAL = plan.credentials.profile
+                    env.HARMONY_DEVICES_CREDENTIAL = plan.credentials.devices
+                    def buildConfig = ciProject.platforms.harmony
+                    def product = (buildConfig.product ?: '{brand}').replace('{brand}', env.CI_BRAND)
+                    env.HARMONY_UNSIGNED_HAP = (buildConfig.artifact ?: '{module}/build/{product}/outputs/{product}/entry-{product}-unsigned.hap')
+                        .replace('{module}', buildConfig.module).replace('{product}', product).replace('{brand}', env.CI_BRAND)
+                    currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.CI_BRAND} ${env.CI_BUILD_TYPE} 鸿蒙包"
+                }
+            }
+        }
+        stage('Checkout Selected Source') {
+            steps {
+                dir('source') {
+                    deleteDir()
+                    script {
+                        def sourceRef = env.CI_PIPELINE == 'release' ? "refs/tags/${env.CI_TAG}" : "refs/heads/${env.CI_BRANCH}"
+                        def refspec = env.CI_PIPELINE == 'release' ?
+                            "+refs/heads/${env.CI_DEFAULT_BRANCH}:refs/remotes/origin/${env.CI_DEFAULT_BRANCH} +refs/tags/${env.CI_TAG}:refs/tags/${env.CI_TAG}" :
+                            "+refs/heads/${env.CI_BRANCH}:refs/remotes/origin/${env.CI_BRANCH}"
+                        def sourceCheckout = checkout([$class: 'GitSCM', branches: [[name: sourceRef]],
+                            extensions: [[$class: 'CloneOption', honorRefspec: true, noTags: true, timeout: 10]],
+                            userRemoteConfigs: [[credentialsId: env.CI_SCM_CREDENTIAL_ID, url: env.APP_REPOSITORY_URL,
+                                refspec: refspec]]])
+                        env.CI_COMMIT = sourceCheckout.GIT_COMMIT
+                        if (!(env.CI_COMMIT ==~ /[0-9a-f]{40}/)) {
+                            error '应用检出必须返回精确 Commit'
+                        }
+                    }
+                    sh 'test "$(git rev-parse HEAD)" = "$CI_COMMIT"'
+                    sh '''
+                        if [ "$CI_PIPELINE" = release ]; then
+                            tag_commit="$(git rev-list -n 1 "refs/tags/$CI_TAG")"
+                            if ! git merge-base --is-ancestor "$tag_commit" "origin/$CI_DEFAULT_BRANCH"; then
+                                echo "Tag $CI_TAG points to a commit outside origin/master: $tag_commit" >&2
+                                exit 1
+                            fi
+                        fi
+                    '''
+                }
+
+            }
+        }
+        stage('Delivery Runtime Preflight') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def dryRunArg = (env.CI_DRY_RUN == 'true') ? ' --dry-run' : ''
+                        sh('python3 "$CI_TOOL_ROOT/delivery/delivery.py" preflight' + dryRunArg)
+                    }
+                }
+            }
+        }
+
+        stage('Preflight and Unsigned HAP') {
+            steps {
+                // 4 GiB Java + 1 GiB Node + 4 GiB LLVM/原生余量；仅计入 cgroup 允许的宿主剩余 swap。
+                sh '''
+                    set -eu
+                    bash "$CI_TOOL_ROOT/delivery/with_linux_build_memory.sh" bash -eu -c '
+                        python3 "$CI_TOOL_ROOT/delivery/harmony_release.py" preflight \
+                            --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --brand="$CI_BRAND" --pipeline="$CI_PIPELINE" --branch="${CI_BRANCH:-}" --tag="${CI_TAG:-}" --build-type="$CI_BUILD_TYPE" --dry-run="$CI_DRY_RUN"
+                        python3 "$CI_TOOL_ROOT/delivery/harmony_release.py" build \
+                            --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --brand="$CI_BRAND" --pipeline="$CI_PIPELINE" --branch="${CI_BRANCH:-}" --tag="${CI_TAG:-}" --build-type="$CI_BUILD_TYPE" --dry-run="$CI_DRY_RUN" \
+                            --root="$WORKSPACE/source"
+                    '
+
+                '''
+            }
+        }
+        stage('Read-only Signing and Verification') {
+            steps {
+                script {
+                    withCredentials([
+                        file(credentialsId: env.HARMONY_P12_CREDENTIAL, variable: 'HARMONY_P12_FILE'),
+                        string(credentialsId: env.HARMONY_PASSWORD_CREDENTIAL, variable: 'HARMONY_P12_PASSWORD'),
+                        file(credentialsId: env.HARMONY_PROFILE_CREDENTIAL, variable: 'HARMONY_PROFILE_FILE'),
+                        file(credentialsId: env.HARMONY_DEVICES_CREDENTIAL, variable: 'HARMONY_DEVICES_FILE')
+                    ]) {
+                        sh '''
+                            set +x
+                            set -eu
+                            bash "$CI_TOOL_ROOT/delivery/with_linux_build_memory.sh" python3 "$CI_TOOL_ROOT/delivery/harmony_release.py" sign \
+                                --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --brand="$CI_BRAND" --pipeline="$CI_PIPELINE" --branch="${CI_BRANCH:-}" --tag="${CI_TAG:-}" --build-type="$CI_BUILD_TYPE" --dry-run="$CI_DRY_RUN" \
+                                --hap="$WORKSPACE/source/$HARMONY_UNSIGNED_HAP" \
+                                --output-dir="$WORKSPACE/source/build/ci-harmony"
+                        '''
+                    }
+                }
+                archiveArtifacts artifacts: 'source/build/ci-harmony/*-signed.hap,source/build/ci-harmony/signature-report.json', fingerprint: true
+            }
+        }
+        stage('Distribute HAP to Pgyer') {
+            steps {
+                script {
+                    def uploadCredentials = [
+                        file(credentialsId: env.HARMONY_P12_CREDENTIAL, variable: 'HARMONY_P12_FILE'),
+                        string(credentialsId: env.HARMONY_PASSWORD_CREDENTIAL, variable: 'HARMONY_P12_PASSWORD'),
+                        file(credentialsId: env.HARMONY_PROFILE_CREDENTIAL, variable: 'HARMONY_PROFILE_FILE'),
+                        file(credentialsId: env.HARMONY_DEVICES_CREDENTIAL, variable: 'HARMONY_DEVICES_FILE')
+                    ]
+                    if (env.CI_DRY_RUN == 'false') {
+                        uploadCredentials.add(string(credentialsId: env.CI_PGYER_CREDENTIAL_ID, variable: 'PGYER_API_KEY'))
+                    }
+                    withCredentials(uploadCredentials) {
+                        sh '''
+                            set +x
+                            set -eu
+                            bash "$CI_TOOL_ROOT/delivery/with_linux_build_memory.sh" python3 "$CI_TOOL_ROOT/delivery/harmony_release.py" upload \
+                                --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --brand="$CI_BRAND" --pipeline="$CI_PIPELINE" --branch="${CI_BRANCH:-}" --tag="${CI_TAG:-}" --build-type="$CI_BUILD_TYPE" --dry-run="$CI_DRY_RUN" \
+                                --hap="$WORKSPACE/source/build/ci-harmony/$CI_BRAND-$CI_BUILD_TYPE-signed.hap" \
+                                --output-dir="$WORKSPACE/source/build/ci-harmony" --commit="$CI_COMMIT"
+                        '''
+                    }
+                }
+                echo '鸿蒙发布结果见 release-info.json。'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'source/build/ci-harmony/*-signed.hap,source/build/ci-harmony/signature-report.json,source/build/ci-harmony/release-info.json', fingerprint: true, allowEmptyArchive: true
+                }
+            }
+        }
+        stage('Notify DingTalk') {
+            when { expression { env.CI_NOTIFY == 'true' } }
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            withCredentials([
+                                string(credentialsId: env.CI_DINGTALK_WEBHOOK_CREDENTIAL_ID, variable: 'DINGTALK_WEBHOOK'),
+                                string(credentialsId: env.CI_DINGTALK_SECRET_CREDENTIAL_ID, variable: 'DINGTALK_SECRET')
+                            ] + (env.CI_DINGTALK_TESTER_CREDENTIAL_ID ? [string(credentialsId: env.CI_DINGTALK_TESTER_CREDENTIAL_ID, variable: 'DINGTALK_TESTER_MOBILE')] : [])) {
+                                sh '''
+                                    set +x
+                                    set -eu
+                                    python3 "$CI_TOOL_ROOT/delivery/harmony_release.py" notify \
+                                        --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --brand="$CI_BRAND" --pipeline="$CI_PIPELINE" --branch="${CI_BRANCH:-}" --tag="${CI_TAG:-}" --build-type="$CI_BUILD_TYPE" --dry-run="$CI_DRY_RUN" \
+                                        --notify="$CI_NOTIFY" --root="$WORKSPACE/source" --commit="$CI_COMMIT" \
+                                        --hap="$WORKSPACE/source/build/ci-harmony/$CI_BRAND-$CI_BUILD_TYPE-signed.hap" --output-dir="$WORKSPACE/source/build/ci-harmony"
+                                '''
+                            }
+                        }
+                    }
+                }
+            }
+            post { unsuccessful { script { ciUnstableStage = env.STAGE_NAME } } }
+        }
+    }
+    post {
+        unstable {
+            script {
+                if (env.CI_NOTIFY == 'true') {
+                    try { load("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy").send('HarmonyOS', 'UNSTABLE', ciUnstableStage ?: ciFailureStage) }
+                    catch (Exception ignored) { echo '通知未发送，保留原结果。' }
+                }
+            }
+        }
+        failure {
+            script {
+                if (env.CI_NOTIFY == 'true') {
+                    try { load("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy").send('HarmonyOS', 'FAILURE', ciFailureStage) }
+                    catch (Exception ignored) { echo '通知未发送，保留原结果。' }
+                }
+            }
+        }
+    }
+}

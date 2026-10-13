@@ -1,0 +1,24 @@
+services:
+  ngrok:
+    image: ngrok/ngrok:3.39.11
+    container_name: sxmqlive-jenkins-ngrok
+    restart: unless-stopped
+    user: "${NGROK_UID:-1000}:${NGROK_GID:-1000}"
+    profiles: ["public"]
+    depends_on:
+      controller:
+        condition: service_healthy
+    command:
+      - http
+      - http://controller:8080
+      - --url
+      - "https://${NGROK_DOMAIN:?set NGROK_DOMAIN in jenkins/remote/.env}"
+      - --traffic-policy-file
+      - /etc/ngrok/policy.yml
+      - --config
+      - /etc/ngrok/ngrok.yml
+    volumes:
+      - ./runtime/ngrok.yml:/etc/ngrok/ngrok.yml:ro
+      - ./runtime/ngrok-policy.yml:/etc/ngrok/policy.yml:ro
+    ports:
+      - "127.0.0.1:14040:4040"

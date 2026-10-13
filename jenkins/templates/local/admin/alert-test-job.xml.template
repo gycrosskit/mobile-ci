@@ -1,0 +1,47 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>内部运维：在双重确认后故意失败一次，用于验收 Jenkins 失败告警是否能到达钉钉。禁止作为普通构建任务使用。</description>
+  <displayName>Jenkins 失败告警验收</displayName>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.BooleanParameterDefinition>
+          <name>CONFIRM_FAILURE_ALERT</name>
+          <description>确认本次构建将故意失败并发送真实钉钉告警</description>
+          <defaultValue>false</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>CONFIRM_TEXT</name>
+          <description>必须输入 SEND_CONTROLLED_FAILURE</description>
+          <defaultValue></defaultValue>
+          <trim>false</trim>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs>
+        <hudson.plugins.git.UserRemoteConfig>
+          <url>{{CI_CI_CHECKOUT_URL}}</url>
+          <credentialsId>{{CI_CI_CHECKOUT_CREDENTIAL}}</credentialsId>
+        </hudson.plugins.git.UserRemoteConfig>
+      </userRemoteConfigs>
+      <branches><hudson.plugins.git.BranchSpec><name>__CI_AUTOMATION_COMMIT__</name></hudson.plugins.git.BranchSpec></branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <submoduleCfg class="empty-list"/>
+      <browser class="{{CI_CI_BROWSER_CLASS}}" plugin="git">
+        <url>{{CI_CI_WEB}}</url>
+      </browser>
+      <gitTool>Default</gitTool>
+      <extensions/>
+    </scm>
+    <scriptPath>jenkins/Jenkinsfile.alert-test</scriptPath>
+    <lightweight>false</lightweight>
+  </definition>
+  <triggers/>
+  <disabled>true</disabled>
+</flow-definition>

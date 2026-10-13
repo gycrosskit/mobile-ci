@@ -1,0 +1,59 @@
+import net.uaznia.lukanus.hudson.plugins.gitparameter.GitParameterDefinition
+import net.uaznia.lukanus.hudson.plugins.gitparameter.SelectedValue
+import net.uaznia.lukanus.hudson.plugins.gitparameter.jobs.JobWrapperFactory
+import jenkins.model.Jenkins
+
+def jobName = '__JOB_NAME__'
+// 品牌白名单由 generate_jenkins_job_templates.py 生成，避免参数页和 ci/brands.json 漂移。
+def allowedBrands = [__ALLOWED_BRANDS__]
+def brand = '__DEFAULT_BRAND__'
+def branchType = 'feature'
+try {
+    brand = BRAND?.toString() ?: brand
+} catch (MissingPropertyException ignored) {
+    // 首次渲染参数页时，Active Choices 可能尚未注入引用参数。
+}
+try {
+    branchType = BRANCH_TYPE?.toString() ?: branchType
+} catch (MissingPropertyException ignored) {
+    // 保持界面中两个 Choice 参数的默认值。
+}
+if (!allowedBrands.contains(brand)) {
+    return ['请先选择品牌:selected']
+}
+def job = Jenkins.get().getItemByFullName(jobName)
+if (job == null) {
+    return ['测试任务不存在:selected']
+}
+job.checkPermission(hudson.model.Item.BUILD)
+def parameter = new GitParameterDefinition(
+    'DISCOVERED_BRANCH',
+    'PT_BRANCH',
+    '',
+    '',
+    '',
+    'origin/(.*)',
+    '*',
+    null,
+    SelectedValue.NONE,
+    '.*legacy-application.git',
+    false
+)
+def wrapper = JobWrapperFactory.createJobWrapper(job)
+def scm = new hudson.plugins.git.GitSCM(
+    [new hudson.plugins.git.UserRemoteConfig('git@gitee.com:example/legacy-application.git', 'origin', '+refs/heads/*:refs/remotes/origin/*', 'fixture-scm')],
+    [], null, null, []
+)
+def branches = parameter.generateContents(wrapper, [scm]).values.collect { org.biouno.unochoice.util.SafeHtmlExtendedMarkupFormatter.INSTANCE.translate(it.value.toString()) }
+
+if (branchType == 'feature') {
+    branches = branches.findAll { it.startsWith("feature/${brand}/") }
+} else if (branchType == 'dev') {
+    branches = branches.findAll { it == "dev/${brand}" }
+} else if (branchType == 'release') {
+    branches = branches.findAll { it.startsWith("release/${brand}-") }
+} else {
+    return ['请先选择分支类型:selected']
+}
+
+return branches.sort() ?: ['该类型暂无远程分支:selected']

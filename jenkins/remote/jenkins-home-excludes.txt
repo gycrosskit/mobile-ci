@@ -1,0 +1,7 @@
+./backups
+./ci-auto-promotion/backups
+./ci-auto-promotion/backups-v2
+./workspace
+./caches
+./.cache
+./war

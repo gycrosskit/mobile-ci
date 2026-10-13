@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "id": "example-mobile",
+  "testOnly": true,
+  "brands": [
+    "example"
+  ],
+  "repositories": {
+    "application": {
+      "identity": "example/native-mobile",
+      "ssh": "git@gitee.com:example/native-mobile.git",
+      "https": "https://gitee.com/example/native-mobile.git",
+      "defaultBranch": "main",
+      "trustRef": "refs/heads/main"
+    },
+    "automation": {
+      "identity": "example/mobile-automation",
+      "ssh": "git@gitee.com:example/mobile-automation.git",
+      "https": "https://gitee.com/example/mobile-automation.git",
+      "defaultBranch": "main",
+      "trustRef": "refs/heads/main"
+    }
+  },
+  "credentials": {
+    "scm": "example-mobile-scm",
+    "giteeApi": "example-mobile-api",
+    "giteeWebhook": "example-mobile-webhook",
+    "giteeConnection": "example-mobile-gitee"
+  },
+  "providers": {
+    "pgyer": {
+      "accountId": "example-mobile-pgyer",
+      "credentialId": "example-mobile-pgyer-key",
+      "legacyNamespace": false
+    },
+    "dingtalk": {
+      "accountId": "example-mobile-dingtalk",
+      "webhookCredentialId": "example-mobile-dingtalk-webhook",
+      "secretCredentialId": "example-mobile-dingtalk-secret",
+      "legacyNamespace": false
+    }
+  },
+  "platforms": {
+    "android": {
+      "adapter": "gradle",
+      "engines": [
+        "native"
+      ],
+      "modules": {
+        "native": "mobile"
+      },
+      "buildTypes": {
+        "test": "Debug",
+        "release": "Release"
+      },
+      "applicationId": "org.example.mobile",
+      "artifact": "mobile/build/outputs/apk/{buildTypeLower}/mobile-{buildTypeLower}.apk"
+    }
+  },
+  "jobs": {
+    "android_test": {
+      "name": "Example Mobile/android-debug",
+      "pipeline": "jenkins/Jenkinsfile.test"
+    },
+    "android_release": {
+      "name": "Example Mobile/android-release",
+      "pipeline": "jenkins/Jenkinsfile.release"
+    },
+    "app_pr": {
+      "name": "Example Mobile/application-pr",
+      "pipeline": "jenkins/Jenkinsfile.pr-validation"
+    },
+    "ci_pr": {
+      "name": "Example Mobile/automation-pr",
+      "pipeline": "jenkins/Jenkinsfile.ci-pr-validation"
+    }
+  },
+  "contract": {
+    "toolDir": "ci/scripts",
+    "testDir": "ci/tests",
+    "brandsFile": "ci/brands.json",
+    "manifestTest": "test_manifest_contract.py",
+    "buildSystem": "gradle",
+    "requiredTools": {
+      "android": [
+        "affected_gradle_tests.py"
+      ]
+    }
+  },
+  "runtime": {
+    "roles": {
+      "controller": "example-controller",
+      "android": "example-android",
+      "pr": "example-pr",
+      "maintenance": "example-maintenance"
+    },
+    "linuxUid": 1000,
+    "macUid": 502
+  },
+  "backup": {
+    "scope": "project",
+    "recipientAuthority": "project-admin",
+    "repository": "application",
+    "branch": "backup/signing"
+  }
+}

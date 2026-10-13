@@ -1,0 +1,109 @@
+fastlane_version File.read(File.expand_path("../.fastlane-version", __dir__)).strip
+
+require "fileutils"
+require "json"
+require "time"
+
+default_platform(:ios)
+
+def required_environment(name)
+  value = ENV.fetch(name, "").strip
+  UI.user_error!("Missing required environment: #{name}") if value.empty?
+  value
+end
+
+def app_store_connect_team_api_key
+  app_store_connect_api_key(
+    key_id: required_environment("ASC_API_KEY_ID"),
+    issuer_id: required_environment("ASC_ISSUER_ID"),
+    key_filepath: required_environment("ASC_API_KEY_PATH"),
+    duration: 1200,
+    in_house: false
+  )
+end
+
+def masked_udid(value)
+  return "****" if value.length < 8
+  "#{value[0, 4]}...#{value[-4, 4]}"
+end
+
+platform :ios do
+  desc "注册可选测试设备并下载当前品牌的最新 Ad Hoc Profile"
+  lane :sync_adhoc_profile do
+    register_new_device = ENV.fetch("REGISTER_NEW_DEVICE", "false") == "true"
+    force_profile_refresh = ENV.fetch("FORCE_PROFILE_REFRESH", "false") == "true"
+    api_key = app_store_connect_team_api_key
+    if register_new_device
+      register_device(
+        name: required_environment("NEW_DEVICE_NAME"),
+        udid: required_environment("NEW_DEVICE_UDID"),
+        team_id: required_environment("IOS_TEAM_ID"),
+        api_key: api_key
+      )
+    end
+
+    get_provisioning_profile(
+      api_key: api_key,
+      app_identifier: required_environment("IOS_BUNDLE_ID"),
+      team_id: required_environment("IOS_TEAM_ID"),
+      provisioning_name: required_environment("IOS_PROFILE_NAME"),
+      adhoc: true,
+      # Fastlane 按参数是否出现判断冲突，不能同时传入 readonly 和 force（即使为 false）。
+      **(register_new_device || force_profile_refresh ? { force: true } : { readonly: true }),
+      output_path: required_environment("IOS_PROFILE_OUTPUT_PATH"),
+      filename: "current-adhoc.mobileprovision",
+      skip_install: true
+    )
+  end
+
+  desc "只读下载当前品牌已存在的 App Store Profile"
+  lane :download_appstore_profile do
+    api_key = app_store_connect_team_api_key
+    get_provisioning_profile(
+      api_key: api_key,
+      app_identifier: required_environment("IOS_BUNDLE_ID"),
+      team_id: required_environment("IOS_TEAM_ID"),
+      provisioning_name: required_environment("IOS_PROFILE_NAME"),
+      readonly: true,
+      output_path: required_environment("IOS_PROFILE_OUTPUT_PATH"),
+      filename: "current-appstore.mobileprovision",
+      skip_install: true
+    )
+  end
+
+
+  desc "列出当前 Developer Team 已登记的 iOS 测试设备"
+  lane :list_test_devices do
+    app_store_connect_team_api_key
+    devices = Spaceship::ConnectAPI::Device.all(
+      filter: { platform: Spaceship::ConnectAPI::Platform::IOS }
+    ).sort_by { |device| [device.name.to_s.downcase, device.udid.to_s] }
+    output_path = required_environment("IOS_DEVICES_OUTPUT_PATH")
+    FileUtils.mkdir_p(File.dirname(output_path))
+    payload = {
+      generatedAt: Time.now.utc.iso8601,
+      teamId: required_environment("IOS_TEAM_ID"),
+      devices: devices.map do |device|
+        {
+          name: device.name,
+          udid: device.udid,
+          status: device.status,
+          platform: device.platform,
+          deviceClass: device.device_class,
+          model: device.model,
+          addedDate: device.added_date&.to_s
+        }
+      end
+    }
+    File.write(output_path, JSON.pretty_generate(payload))
+
+    UI.message("Developer Team #{payload[:teamId]}：共 #{devices.length} 台已登记设备")
+    devices.each do |device|
+      UI.message(
+        "- #{device.name} | #{masked_udid(device.udid.to_s)} | " \
+        "#{device.device_class} | #{device.status}"
+      )
+    end
+    UI.message("完整 UDID 已写入受限构建产物，不在控制台明文显示。")
+  end
+end

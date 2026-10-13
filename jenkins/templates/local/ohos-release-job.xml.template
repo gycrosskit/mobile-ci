@@ -1,0 +1,121 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<!-- 分支/Tag 选择器由 generate_jenkins_job_templates.py 从 jenkins/selectors/ 生成，请修改规范文本。 -->
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>HarmonyOS Release 正式包：选择品牌的 &lt;brand&gt;-ohos-v&lt;version&gt; Tag；固定 Release、生产 API、诊断关闭；构建、只读签名和严格验签；默认 UPLOAD_AND_NOTIFY=true：HAP 与同源 P12/密码完整分发并验收后发送通知；关闭时仅验证，不上传、不读取通知凭据。官方 Linux SDK 的 linux-build 节点使用 4 GiB Gradle、1 GiB Node 和 4 GiB LLVM/原生余量，总预算至少 9 GiB。可用物理内存与允许的剩余 swap 同时受宿主及 cgroup memory/memsw 限制，禁用或未核实的 swap 不计入。</description>
+  <displayName>鸿蒙 Release 正式包</displayName>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>BRAND</name>
+          <description>已登记独立 HarmonyOS 应用的品牌；材料验收前 signing.enabled=false 会阻断构建。</description>
+          <!-- 由 generate_jenkins_job_templates.py 根据 ci/brands.json 的 harmony 配置维护。 -->
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>cihang</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>BUILD_TYPE</name>
+          <description>固定 Release：Release 优化、生产 API、诊断关闭；仍使用指定设备签名，不代表市场发布。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>Release</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <org.biouno.unochoice.CascadeChoiceParameter plugin="uno-choice">
+          <name>GIT_TAG</name>
+          <description>只显示所选品牌的鸿蒙正式 Tag，可输入版本号继续过滤。</description>
+          <randomName>choice-parameter-ohos-git-tag</randomName>
+          <visibleItemCount>1</visibleItemCount>
+          <script class="org.biouno.unochoice.model.GroovyScript">
+            <secureScript>
+              <script>import net.uaznia.lukanus.hudson.plugins.gitparameter.GitParameterDefinition
+import net.uaznia.lukanus.hudson.plugins.gitparameter.SelectedValue
+import net.uaznia.lukanus.hudson.plugins.gitparameter.jobs.JobWrapperFactory
+import jenkins.model.Jenkins
+
+def jobName = '__JOB_NAME__'
+// 品牌白名单由 generate_jenkins_job_templates.py 生成，避免参数页和 ci/brands.json 漂移。
+def allowedBrands = ['cihang']
+def brand = 'cihang'
+try {
+    brand = BRAND?.toString() ?: brand
+} catch (MissingPropertyException ignored) {
+    // 首次渲染参数页时，Active Choices 可能尚未注入引用参数。
+}
+if (!allowedBrands.contains(brand)) {
+    return ['请先选择品牌:selected']
+}
+def job = Jenkins.get().getItemByFullName(jobName)
+if (job == null) {
+    return ['正式任务不存在:selected']
+}
+job.checkPermission(hudson.model.Item.BUILD)
+def parameter = new GitParameterDefinition(
+    'DISCOVERED_TAG',
+    'PT_TAG',
+    '',
+    '',
+    null,
+    '.*',
+    '*',
+    null,
+    SelectedValue.NONE,
+    '{{CI_APP_REPO_PATTERN}}',
+    false
+)
+def wrapper = JobWrapperFactory.createJobWrapper(job)
+def scm = new hudson.plugins.git.GitSCM(
+    [new hudson.plugins.git.UserRemoteConfig('{{CI_APP_SSH}}', 'origin', '+refs/heads/*:refs/remotes/origin/*', '{{CI_CREDENTIAL_SCM}}')],
+    [], null, null, []
+)
+def tags = parameter.generateContents(wrapper, [scm]).values.collect { org.biouno.unochoice.util.SafeHtmlExtendedMarkupFormatter.INSTANCE.translate(it.value.toString()) }
+def prefix = "${brand}-ohos-v"
+return tags.findAll { it.startsWith(prefix) }.sort().reverse() ?:
+    ['该品牌暂无鸿蒙正式 Tag:selected']</script>
+              <sandbox>false</sandbox>
+            </secureScript>
+            <secureFallbackScript>
+              <script>return ['Tag 加载失败，请联系 Jenkins 管理员:selected']</script>
+              <sandbox>true</sandbox>
+            </secureFallbackScript>
+          </script>
+          <projectName>__JOB_NAME__</projectName>
+          <projectFullName>__JOB_NAME__</projectFullName>
+          <parameters class="linked-hash-map"/>
+          <referencedParameters>BRAND</referencedParameters>
+          <choiceType>PT_SINGLE_SELECT</choiceType>
+          <filterable>true</filterable>
+          <filterLength>1</filterLength>
+        </org.biouno.unochoice.CascadeChoiceParameter>
+        <hudson.model.BooleanParameterDefinition>
+          <name>UPLOAD_AND_NOTIFY</name>
+          <description>true 上传并通知；false 只验证构建和签名，不上传、不读取通知凭据。</description>
+          <defaultValue>true</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs><hudson.plugins.git.UserRemoteConfig>
+        <url>{{CI_CI_CHECKOUT_URL}}</url>
+        <credentialsId>{{CI_CI_CHECKOUT_CREDENTIAL}}</credentialsId>
+      </hudson.plugins.git.UserRemoteConfig></userRemoteConfigs>
+      <branches><hudson.plugins.git.BranchSpec><name>__CI_AUTOMATION_COMMIT__</name></hudson.plugins.git.BranchSpec></branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <submoduleCfg class="empty-list"/>
+      <extensions/>
+    </scm>
+    <scriptPath>jenkins/Jenkinsfile.ohos.test</scriptPath>
+    <lightweight>false</lightweight>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>

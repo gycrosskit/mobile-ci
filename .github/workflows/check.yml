@@ -1,0 +1,16 @@
+name: Public CI reference checks
+
+'on':
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # 同仓库引用自动使用 caller 的同一 commit；复制时两个文件必须一起审查。
+    uses: ./.github/workflows/reusable-check.yml
+    with:
+      project-id: example-mobile
+    secrets: {}

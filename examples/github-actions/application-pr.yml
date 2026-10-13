@@ -1,0 +1,13 @@
+name: Application PR
+'on':
+  pull_request:
+    branches: ['__BASE_BRANCH__']
+    types: [opened, reopened, synchronize, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  check:
+    uses: __CI_REPOSITORY__/.github/workflows/reusable-application-pr.yml@__WORKFLOW_SHA__
+    with:
+      project-id: __PROJECT_ID__
+    secrets: {}
