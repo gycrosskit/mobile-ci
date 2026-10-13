@@ -1,6 +1,6 @@
 # 通用工具迁入 GitHub
 
-目标公共工具仓库为 `gycrosskit/mobile-ci`。应用继续由私有 Gitee 保存，沿用原工程与契约，不新增 YAML。
+通用工具已公开于 [gycrosskit/mobile-ci](https://github.com/gycrosskit/mobile-ci)。应用继续由私有 Gitee 保存，沿用原工程与契约，不新增 YAML。
 工具 GitHub Actions 只做本仓库源码与安全回归，生产 Jenkins 显式消费管理员审核的固定完整 CI SHA。
 公开 PR 不会部署 Controller、读取应用或供应商凭据、签名、上传安装包或发通知。
 
@@ -13,6 +13,11 @@
 仅运行该一个测试，明确要求 Darwin、`testsRun == 1` 且无跳过；使用 runner自带 C工具链，
 不安装移动 SDK、不读取签名材料。Ubuntu只委派这个精确平台用例，本地macOS公共全套仍运行它。
 两类job均不接受 secrets、不使用 `pull_request_target` 或 self-hosted runner，不归档安装包。
+
+[PR #1](https://github.com/gycrosskit/mobile-ci/pull/1) 的 [Actions](https://github.com/gycrosskit/mobile-ci/actions/runs/38391380014)
+通过 827 个 Linux 用例和 1 个 macOS 原生用例，已合并为 `c08df9867964f618976910c83aadea6662582dc8`。
+[真实 fork PR #2](https://github.com/gycrosskit/mobile-ci/pull/2) 的 [Actions](https://github.com/gycrosskit/mobile-ci/actions/runs/38394695953)
+也已通过，随后关闭且未合并；该 fork 来自既有维护者，不能作为首次外部贡献者审批流程的证明。
 
 `python3 jenkins/run_public_checks.py` 先做运行时预检，再复制 UTF-8 公开源码到临时树。
 测试用 `tests/fixtures/legacy-project.json` 只含假仓库、假账号和零摘要，标记 `testOnly=true`。
@@ -34,9 +39,8 @@
 `SOURCE-MANIFEST.json` 绑定每个发行文件的 SHA-256，`SOURCE-ORIGIN.json` 标明源 Commit 和工作树快照。
 未提交内容是否属于该 Commit 必须据快照说明区分。LICENSE、NOTICE、上游声明与安全报告入口保留。
 公司 profile、运维 runbook、生产操作文档和私有验收链接不会随包公开；入口改为通用文档。
-镜像核查的原始实例记录不进入包，115 UNKNOWN 仍阻断镜像发行；官方 Linux CLT 26.0.0.851 原 ZIP已完整实装，冻结的 ZIP/许可摘要未变，
-UID1000且network-none runtime通过；冷缓存 HAP待正式工具提交后独立验收。
+镜像核查的原始实例记录不进入包，115 UNKNOWN 仍阻断镜像发行。
+官方 Linux CLT 已通过隔离运行预检和冷缓存无签名 HAP 构建，签名验收仍待完成，见 [鸿蒙环境重建](鸿蒙环境重建.md)。
 
 仓库公开、初次上传与生产工具源切换须分别核对实际结果。本地测试与静态 YAML 检查不等于远端 Actions 通过。
-安全邮箱已于 2026-10-13 17:53:46+08:00 完成一次自发自收，
-只能证明该账号此次收信；一封外部邮件已于 2026-10-13 18:10:22+08:00 送达，经人工纠正垃圾分类后在收件箱；不能保证所有发件方自动归入收件箱，维护仍需检查垃圾箱。GitHub 私有漏洞报告入口尚未验收。
+GitHub 私有漏洞报告入口已启用；维护者邮箱的外部投递及垃圾分类限制见 [SECURITY](../SECURITY.md)。
