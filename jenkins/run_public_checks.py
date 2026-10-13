@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from jenkins.export_public_source import export
 
+MACOS_NATIVE_CHECK = 'tests.signing.test_ios_signing_preflight.IosSigningPreflightTest.test_native_preflight_fails_without_keychain'
+
 GROOVY_SHA256 = 'de65260cf2070442e99882f2f3d72e7531725c1e6a257446cc0cea525c607bd0'
 # 私有部署事实/应用源码校验另跑；按精确用例区分，禁止排除整个安全模块。
 PRIVATE_CHECKS = {
@@ -38,7 +40,10 @@ def cases(suite):
 
 def run_suite():
     all_cases = list(cases(unittest.defaultTestLoader.discover('tests', top_level_dir='.')))
-    selected = [test for test in all_cases if test.id() not in PRIVATE_CHECKS]
+    selected = [test for test in all_cases if test.id() not in PRIVATE_CHECKS
+                and not (sys.platform == 'linux' and test.id() == MACOS_NATIVE_CHECK)]
+    if sys.platform == 'linux':
+        print('DELEGATED platform security check: ' + MACOS_NATIVE_CHECK + ': macos-14 native-preflight job', flush=True)
     for identity, reason in PRIVATE_CHECKS.items():
         print('PRIVATE compatibility check: ' + identity + ': ' + reason, flush=True)
     result = unittest.TextTestRunner(verbosity=1, buffer=True).run(unittest.TestSuite(selected))
@@ -47,7 +52,17 @@ def run_suite():
     return 0 if result.wasSuccessful() and not result.skipped else 1
 
 
+def run_macos_native_check():
+    if sys.platform != 'darwin':
+        raise ValueError('原生 Security.framework 安全回归必须在 macOS 执行，不能跳过')
+    suite = unittest.defaultTestLoader.loadTestsFromName(MACOS_NATIVE_CHECK)
+    result = unittest.TextTestRunner(verbosity=2, buffer=True).run(suite)
+    return 0 if result.wasSuccessful() and result.testsRun == 1 and not result.skipped else 1
+
+
 def main():
+    if len(sys.argv) == 2 and sys.argv[1] == '--macos-native-check':
+        return run_macos_native_check()
     if len(sys.argv) == 2 and sys.argv[1] == '--isolated-suite':
         return run_suite()
     for name in ('git', 'java', 'node', 'ruby', 'docker', 'openssl'):

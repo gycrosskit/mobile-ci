@@ -22,6 +22,15 @@ APPROVED = {
     ('generic-api-key', 1, '4e65146fffb2c66a1decdf447b3fda802f9865d73ade17b497a19e5b0cd2b93f'),
     ('private-key', 2, '4a47b67dc69abc3135cceb8aafa45906c3b8965106c86d94ccd29cd2b8bfba6f'),
     ('private-key', 2, '9e79164d7fb8b53dfde019f6b34454da129b5d193d3b1dcb083eb5bb08d51d6d'),
+    # 发行清单的四个 credentials 源码摘要已逐文件核实；只批准两种缩进的完整 JSON 行。
+    ('generic-api-key', 1, '9879ac1db469e5734c34c986ccecbcc001d37531f51a3cc224498ea297ead12f'),
+    ('generic-api-key', 1, '5a609069cf5baac9d53ad2cbff3e0136278e3266695a379cf76b4eada2d9ad7d'),
+    ('generic-api-key', 1, 'df837789d8ab5d1ee0a3b481f37701559a474f513fabcc9c1134a1a141e20c79'),
+    ('generic-api-key', 1, '69246ad7189f5902419439a97a1c92a7ce5c599152b69c874f423363dedc008a'),
+    ('generic-api-key', 1, '7034ba951ec9fbe25294d8dbf20b05295437bce09dd88fe9bc56ed73ef672acf'),
+    ('generic-api-key', 1, 'b8f86fcbf0d157687bfd8de20ba5716b36717c0fd7f11c0c4fa98e00766d2c1b'),
+    ('generic-api-key', 1, '2663a3ce7e90441c415ca7fe4b1d0ed4ddff5c398ff7d625dcc61c8069c9aa5a'),
+    ('generic-api-key', 1, '45209d09b7ecedb9730cb31fce3b9090994802e94614c10f64b4ee69d8765a8a'),
 }
 
 

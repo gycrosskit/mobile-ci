@@ -113,6 +113,31 @@ class HistoryAuditTest(unittest.TestCase):
                 with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],status)),self.assertRaises((audit.AuditError,ValueError)):
                     audit.scan(Path('/fixed/scanner'),'git',root,root)
 
+    def test_source_manifest_digest_approval_requires_verified_file_and_exact_json_line(self):
+        source_root=Path(__file__).resolve().parents[2]
+        names=('signing/harmony_jenkins_credentials.py','signing/ios_jenkins_credentials.py',
+               'tests/signing/test_harmony_jenkins_credentials.py','tests/signing/test_ios_jenkins_credentials.py')
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve(); oid='c'*40; path=root/(oid+'.blob')
+            finding={'File':str(path),'RuleID':'generic-api-key','StartLine':1,'EndLine':1}
+            for name in names:
+                digest=hashlib.sha256((source_root/name).read_bytes()).hexdigest()
+                for indent in (2,4):
+                    line=(' '*indent+json.dumps(name)+': '+json.dumps(digest)+',').encode()
+                    with self.subTest(name=name,indent=indent):
+                        path.write_bytes(line+b'\nextra\n')
+                        objects={oid:('blob',path.stat().st_size)}
+                        self.assertTrue(audit.sanitize_finding(finding,'dir',root,objects,root)['approved'])
+                        for change in ({'RuleID':'private-key'},{'EndLine':2}):
+                            self.assertFalse(audit.sanitize_finding(dict(finding,**change),'dir',root,objects,root)['approved'])
+                        changed_digest=('0' if digest[0]!='0' else '1')+digest[1:]
+                        for changed in (line.replace(digest.encode(),changed_digest.encode()),
+                                        line.replace(name.encode(),('other/'+name).encode()), b' '+line,
+                                        line+b' changed'):
+                            path.write_bytes(changed+b'\n')
+                            objects={oid:('blob',path.stat().st_size)}
+                            self.assertFalse(audit.sanitize_finding(finding,'dir',root,objects,root)['approved'])
+
     def test_report_rejects_fifo_symlink_and_hardlink_without_exposing_data(self):
         for kind in ('fifo','symlink','hardlink'):
             with self.subTest(kind=kind),tempfile.TemporaryDirectory() as directory:

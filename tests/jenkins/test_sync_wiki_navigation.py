@@ -1,6 +1,8 @@
 """验证实际 Git 增删改名、Wiki 幂等发布与过期构建保护。"""
 
 from pathlib import Path
+import copy
+import json
 import os
 import subprocess
 import tempfile
@@ -33,6 +35,13 @@ class WikiNavigationTest(unittest.TestCase):
         module.git(self.repo, "add", "--all")
         module.git(self.repo, "-c", "commit.gpgSign=false", "-c", "user.name=Test",
                    "-c", "user.email=test@localhost", "commit", "-m", "fixture")
+
+    def profile(self, branch='master'):
+        value=json.loads((Path(module.__file__).parents[1]/'tests/fixtures/legacy-project.json').read_text())
+        value['repositories']['application'].update(identity='example/wiki-app', ssh='git@gitee.com:example/wiki-app.git',
+            https='https://gitee.com/example/wiki-app.git', defaultBranch=branch, trustRef='refs/heads/'+branch)
+        value.pop('portal')
+        return module.validate_project(value)
 
     def remotes(self):
         source = self.root / "source.git"
@@ -166,7 +175,7 @@ class WikiNavigationTest(unittest.TestCase):
         result = subprocess.run(["python3", str(script), "--repo", str(self.repo), "--output", str(output)],
                                 cwd=other, capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(module.navigation(self.repo), output.read_text())
+        self.assertEqual(module.navigation(self.repo, module.load_project()), output.read_text())
         self.assertNotIn("WRONG CI", output.read_text())
 
     def test_publish_cli_passes_explicit_application_root_to_both_master_guards(self):
@@ -174,10 +183,11 @@ class WikiNavigationTest(unittest.TestCase):
         guard = module.assert_current_master
         with patch("sys.argv", ["sync", "--publish", "--repo", str(self.repo)]), \
                 patch.object(module, "SOURCE_REMOTE", str(source)), patch.object(module, "WIKI_REMOTE", str(wiki)), \
+                patch.object(module, 'bindings', return_value=(str(source),str(wiki),module.WEB_ROOT,module.WIKI_WEB_ROOT.split('?',1)[0],'master')), \
                 patch.object(module, "assert_current_master", wraps=guard) as checks:
             module.main()
         sha = module.git(self.repo, "rev-parse", "HEAD").strip()
-        self.assertEqual([(self.repo.resolve(), sha), (self.repo.resolve(), sha)], [call.args for call in checks.call_args_list])
+        self.assertEqual([(self.repo.resolve(), sha, module.load_project())]*2, [call.args for call in checks.call_args_list])
 
     def test_environment_reads_application_docs_from_ci_cwd(self):
         output = self.root / "navigation.md"
@@ -185,7 +195,57 @@ class WikiNavigationTest(unittest.TestCase):
                                 cwd=Path(module.__file__).parents[1],
                                 env=dict(os.environ, APP_SOURCE_ROOT=str(self.repo)), capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(module.navigation(self.repo), output.read_text())
+        self.assertEqual(module.navigation(self.repo, module.load_project()), output.read_text())
+
+    def test_profile_uses_only_committed_same_repository_team_links_and_escapes_labels(self):
+        profile=self.profile('main'); base='https://gitee.com/example/wiki-app/wikis/pages/preview'
+        valid=base+'?sort_id=1&doc_id=2'
+        self.write('docs/README.md', '# Index\n[Team \\[x\\]]('+valid+')')
+        invalid=(valid+'&extra=3', valid+'&sort_id=4', base+'?sort_id=0&doc_id=2', valid+'#fragment',
+                 valid.replace('gitee.com','gitee.com.evil'),valid.replace('gitee.com','user@gitee.com'),
+                 valid.replace('example/wiki-app','other/wiki-app'))
+        self.write('docs/规范/测试.md', '# Test\n[Duplicate]('+base+'?doc_id=2&sort_id=1)\n'+
+                   '\n'.join('[BAD]('+url+')' for url in invalid))
+        self.commit()
+        self.write('docs/new.md', '[Uncommitted]('+base+'?sort_id=3&doc_id=2)')
+        output=module.navigation(self.repo,profile)
+        self.assertEqual(1,output.count(valid))
+        self.assertIn(r'[Team \[x\]]',output)
+        self.assertIn('/blob/main/',output)
+        self.assertNotIn('BAD',output); self.assertNotIn('Uncommitted',output)
+        self.assertNotIn('8404213',output)
+
+    def test_profile_rejects_non_gitee_spoofed_urls_and_reference_before_git(self):
+        original=self.profile()
+        for fields in ({'provider':'github'},{'https':'https://gitee.com.evil/example/wiki-app.git'},
+                       {'ssh':'git@gitee.com:other/wiki-app.git'}, {'https':'https://user@gitee.com/example/wiki-app.git'},
+                       {'https':'https://gitee.com/example/wiki-app.git?remote=other'}, {'trustRef':'refs/heads/other'}):
+            value=copy.deepcopy(original); value['repositories']['application'].update(fields)
+            with self.subTest(fields=fields), patch.object(module,'git') as git, self.assertRaises(ValueError):
+                module.publish(self.repo,value)
+            git.assert_not_called()
+
+    def test_profile_publish_uses_fixed_branch_and_ignores_fake_legacy_remotes(self):
+        profile=self.profile('main'); module.git(self.repo,'branch','-m','main')
+        source,wiki=self.remotes(); real_git=module.git
+        trusted_source,trusted_wiki,*_=module.bindings(profile)
+        calls=[]
+        def local_git(repo,*args):
+            calls.append(args)
+            mapped=tuple(str(source) if arg==trusted_source else str(wiki) if arg==trusted_wiki else arg for arg in args)
+            return real_git(repo,*mapped)
+        with patch.object(module,'SOURCE_REMOTE','git@gitee.com:fake/default.git'), \
+                patch.object(module,'WIKI_REMOTE','git@gitee.com:fake/default.wiki.git'), \
+                patch.object(module,'git',side_effect=local_git), \
+                patch.object(module,'load_project',return_value=profile) as loader, \
+                patch.dict(os.environ,CI_PROJECT_ID='sxmqlive',CI_DEFAULT_BRANCH='evil',SOURCE_REMOTE='fake-env'), \
+                patch('sys.argv',['sync','--publish','--repo',str(self.repo)]):
+            module.main()
+        loader.assert_called_once_with('sxmqlive')
+        self.assertEqual(2,calls.count(('ls-remote',trusted_source,'refs/heads/main')))
+        self.assertTrue(any(args[:4]==('clone','--depth','1',trusted_wiki) for args in calls))
+        self.assertFalse(any('fake/default' in str(arg) for args in calls for arg in args))
+        self.assertEqual(module.PAGE+'\0',real_git(wiki,'diff','--name-only','-z','HEAD^','HEAD'))
 
     def test_missing_application_root_is_rejected_instead_of_reading_ci_docs(self):
         environment = dict(os.environ)

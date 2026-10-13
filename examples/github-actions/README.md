@@ -23,7 +23,7 @@
 Action 使用官方仓库完整 commit：checkout v4.2.2、setup-python v5.6.0、setup-java v4.7.1。
 Python 固定 3.11.9，Temurin JDK 固定 21.0.11+10；Groovy 2.4.21 从 Maven Central 下载，并核对与现有
 Jenkins 测试运行时一致的 SHA-256。更新版本时同步更新 YAML、测试常量和校验值，重新做最小验收。
-`ubuntu-24.04` 是托管镜像系列，不是不可变镜像摘要；这些锁不能代替真实远端验收。
+`ubuntu-24.04` 和 `macos-14` 是托管镜像系列，不是不可变镜像摘要；这些锁不能代替真实远端验收。
 
 PR 与手动 caller 均只授予 `contents: read`，显式零 secret，checkout 不保留 token。
 fork PR 运行候选代码只使用 GitHub-hosted runner；禁止 `pull_request_target`、self-hosted runner、
@@ -38,6 +38,9 @@ fork PR 运行候选代码只使用 GitHub-hosted runner；禁止 `pull_request_
 python3 jenkins/run_public_checks.py
 ```
 
+独立 `macos-14` job只跑原生 Security.framework缺失 Keychain负向：
+`python3 jenkins/run_public_checks.py --macos-native-check`，要求Darwin、1个测试成功且0跳过。
+Ubuntu只委派这个精确用例，macOS本地全套仍执行它；该项属于公共平台检查，不计入7项私有兼容。
 公共 runner 校验运行时、拒绝测试 skip，在临时树安装 `testOnly=true` 合成 fixture 以运行安全核心；
 精确私有兼容用例单独列明，仍在私有 Jenkins 检查，详见 [迁移边界](../../docs/GitHub迁移.md)。
 YAML 静态测试使用现有 Ruby/Psych 标准解析器，缺少 Ruby 时明确失败；不安装额外 Python 运行依赖。

@@ -15,6 +15,9 @@ APPLE_INTERMEDIATE_CERTIFICATE_DIR=/srv/ci/apple-ca-reviewed \
 不跟随重定向，限制响应体和下载时间。七份 DER 与转换后 PEM 的 DER 摘要全部匹配后，才无覆盖地原子发布。
 命令不安装证书，也不操作钥匙串。
 
+Jenkins 管理员应把 `APPLE_INTERMEDIATE_CERTIFICATE_DIR` 固定到节点环境，并以实际 Agent 服务账号
+验证七份证书可读且摘要匹配。源码不携带 PEM，不能仅验证管理员自己的账号后就切换工具源。
+
 ## 间歇 HTTP 403 的处理
 
 2026-10-13 在本机重新获取时，一次全套请求于 G6 返回 curl 56，输出目录没有发布；

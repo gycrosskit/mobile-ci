@@ -39,17 +39,23 @@ class GitHubWorkflowExamplesTest(unittest.TestCase):
         self.assertEqual({"contents": "read"}, workflow["permissions"])
         self.assertEqual({"workflow_call"} if reusable else {"pull_request", "workflow_dispatch"}, set(workflow["on"]))
         self.assertNotIn("secrets.", json.dumps(workflow))
-        for job in workflow["jobs"].values():
+        if reusable:
+            self.assertEqual({"public-check", "native-preflight"}, set(workflow["jobs"]))
+        for name, job in workflow["jobs"].items():
             self.assertEqual({"contents": "read"}, job.get("permissions", workflow["permissions"]))
             self.assertEqual({}, job.get("secrets", {}))
             self.assertNotIn("environment", job)
+            self.assertNotIn("if", job)
+            self.assertNotIn("continue-on-error", job)
             if "uses" in job:
                 self.assertEqual("./.github/workflows/reusable-check.yml", job["uses"])
                 self.assertNotIn("runs-on", job)
                 continue
-            self.assertEqual("ubuntu-24.04", job["runs-on"])
+            self.assertEqual("macos-14" if name == "native-preflight" else "ubuntu-24.04", job["runs-on"])
             self.assertNotIn("container", job)
             for step in job["steps"]:
+                self.assertNotIn("continue-on-error", step)
+                self.assertNotIn("if", step)
                 if "uses" in step:
                     self.assertIn(step["uses"], ACTION_PINS)
                 if "run" in step:
@@ -58,6 +64,7 @@ class GitHubWorkflowExamplesTest(unittest.TestCase):
     def test_parse_triggers_typed_input_and_explicit_zero_secrets(self):
         self.assert_safe(self.caller)
         self.assert_safe(self.reusable, reusable=True)
+        self.assertEqual({"public-check", "native-preflight"}, set(self.reusable["jobs"]))
         contract = self.reusable["on"]["workflow_call"]
         self.assertEqual({}, contract["secrets"])
         self.assertEqual({"project-id"}, set(contract["inputs"]))
@@ -84,6 +91,31 @@ class GitHubWorkflowExamplesTest(unittest.TestCase):
         self.assertEqual(False, actions["actions/checkout"]["with"]["persist-credentials"])
         self.assertEqual("3.11.9", actions["actions/setup-python"]["with"]["python-version"])
         self.assertEqual("21.0.11+10", actions["actions/setup-java"]["with"]["java-version"])
+
+    def test_native_security_job_is_narrow_fixed_and_cannot_silently_skip(self):
+        from jenkins.run_public_checks import MACOS_NATIVE_CHECK
+        job = self.reusable["jobs"]["native-preflight"]
+        self.assertEqual("macos-14", job["runs-on"])
+        self.assertEqual(5, job["timeout-minutes"])
+        self.assertEqual(3, len(job["steps"]))
+        self.assertEqual(False, job["steps"][0]["with"]["persist-credentials"])
+        self.assertEqual("actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", job["steps"][0]["uses"])
+        self.assertEqual("actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", job["steps"][1]["uses"])
+        self.assertEqual("3.11.9", job["steps"][1]["with"]["python-version"])
+        self.assertEqual("python3 jenkins/run_public_checks.py --macos-native-check", job["steps"][2]["run"])
+        self.assertEqual(1, unittest.defaultTestLoader.loadTestsFromName(MACOS_NATIVE_CHECK).countTestCases())
+        for field, value in (("runs-on", "ubuntu-24.04"), ("if", False), ("continue-on-error", True), ("secrets", "inherit")):
+            bad = copy.deepcopy(self.reusable)
+            bad["jobs"]["native-preflight"][field] = value
+            with self.subTest(field=field), self.assertRaises(AssertionError):
+                self.assert_safe(bad, reusable=True)
+
+        for mutate in (lambda workflow: workflow["jobs"].pop("native-preflight"),
+                       lambda workflow: workflow["jobs"]["native-preflight"]["steps"][2].update({"if": False})):
+            bad = copy.deepcopy(self.reusable)
+            mutate(bad)
+            with self.assertRaises(AssertionError):
+                self.assert_safe(bad, reusable=True)
 
     def test_installed_tool_workflows_match_reviewed_examples(self):
         for name in ("check.yml", "reusable-check.yml"):

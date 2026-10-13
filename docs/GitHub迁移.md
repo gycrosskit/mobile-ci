@@ -9,7 +9,10 @@
 `.github/workflows/check.yml` 调用同一提交的 `reusable-check.yml`；
 [参考例子](../examples/github-actions/README.md) 与实际 workflow 同步维护。
 使用 GitHub-hosted `ubuntu-24.04`、`contents: read`、完整 Action SHA、JDK 21 和锁定摘要的 Groovy 2.4.21。
-不接受 secrets、不使用 `pull_request_target` 或 self-hosted runner，不归档安装包。
+原生 Security.framework 的缺失 Keychain 负向由独立 `macos-14` job执行，
+仅运行该一个测试，明确要求 Darwin、`testsRun == 1` 且无跳过；使用 runner自带 C工具链，
+不安装移动 SDK、不读取签名材料。Ubuntu只委派这个精确平台用例，本地macOS公共全套仍运行它。
+两类job均不接受 secrets、不使用 `pull_request_target` 或 self-hosted runner，不归档安装包。
 
 `python3 jenkins/run_public_checks.py` 先做运行时预检，再复制 UTF-8 公开源码到临时树。
 测试用 `tests/fixtures/legacy-project.json` 只含假仓库、假账号和零摘要，标记 `testOnly=true`。
