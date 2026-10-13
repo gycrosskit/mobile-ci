@@ -20,7 +20,6 @@ pipeline {
 
     environment {
         CI_OUTPUT_DIR = 'build/ci-ios'
-        APP_REPOSITORY_URL = 'git@gitee.com:example/legacy-application.git'
         IOS_SIGNING_STATE_DIR = 'build/ci-ios/signing'
         REGISTER_NEW_DEVICE = 'false'
         SIGH_READONLY = 'true'
