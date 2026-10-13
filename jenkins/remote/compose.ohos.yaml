@@ -1,0 +1,118 @@
+# 仅用 -f compose.yaml -f compose.ohos.yaml 启用；不要为首次部署重建现有 Controller。
+services:
+  ohos-volumes-init:
+    image: sxmqlive/jenkins-controller:2.568.3-gitee-1301
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -d -o 1000 -g 1000 -m 700 /ohos-gradle
+        && install -d -o 1000 -g 1000 -m 700 /maintenance-secret
+        && install -d -o 1000 -g 1000 -m 700 /maintenance-work
+        && install -d -o 1000 -g 1000 -m 700 /maintenance-gradle
+        && install -d -o 1000 -g 1000 -m 700 /ohos-signing
+        && install -d -o 1000 -g 1000 -m 700 /linux-build-memory
+        && test ! -L /linux-build-memory/build.lock
+        && if [ ! -e /linux-build-memory/build.lock ]; then
+        (umask 077; set -C; : > /linux-build-memory/build.lock)
+        && chown 1000:1000 /linux-build-memory/build.lock
+        && chmod 600 /linux-build-memory/build.lock; fi
+        && test -f /linux-build-memory/build.lock
+        && test "$(stat -c '%u:%a' /linux-build-memory/build.lock)" = "1000:600"
+    volumes:
+      - ohos_gradle_cache:/ohos-gradle
+      - jenkins_ohos_maintenance_secret:/maintenance-secret
+      - jenkins_ohos_maintenance_work:/maintenance-work
+      - ohos_maintenance_gradle_cache:/maintenance-gradle
+      - ohos_signing:/ohos-signing
+      - type: volume
+        source: linux_build_memory
+        target: /linux-build-memory
+        volume:
+          nocopy: true
+    restart: "no"
+
+  controller:
+    environment:
+      OHOS_MAINTENANCE_AGENT_NAME: signing-maintenance
+      OHOS_MAINTENANCE_AGENT_REMOTE_FS: /home/jenkins/agent
+      OHOS_MAINTENANCE_AGENT_SECRET_FILE: /run/jenkins-ohos-maintenance-bootstrap/agent.secret
+    volumes:
+      - jenkins_ohos_maintenance_secret:/run/jenkins-ohos-maintenance-bootstrap
+      - ./init.groovy.d/05-configure-ohos-agent.groovy:/var/jenkins_home/init.groovy.d/05-configure-ohos-agent.groovy:ro
+      - ./init.groovy.d/06-configure-packaging-view.groovy:/var/jenkins_home/init.groovy.d/06-configure-packaging-view.groovy:ro
+
+  # 扩展现有构建容器；Android 与 Harmony 只共用 Executor/工具链，缓存仍各自隔离。
+  android-agent:
+    build:
+      context: ./ohos-agent
+      dockerfile: Dockerfile.compat
+      args:
+        OHOS_AGENT_BASE_IMAGE: "${OHOS_AGENT_BASE_IMAGE:?统一Android/OHOS节点必须显式选择已审Android基础镜像}"
+    image: sxmqlive-jenkins-ohos-agent:clt26-jdk21
+    depends_on:
+      ohos-volumes-init:
+        condition: service_completed_successfully
+    environment:
+      HARMONY_GRADLE_USER_HOME: /home/jenkins/.harmony-gradle
+      HARMONY_CLT_HOME: /opt/harmony-clt
+      HARMONY_GRADLE_HEAP_MB: "4096"
+      HARMONY_NODE_HEAP_MB: "1024"
+    volumes:
+      - ohos_gradle_cache:/home/jenkins/.harmony-gradle
+      - ${OHOS_CLT_HOST_DIR:?先安装并验证冻结官方Linux CLT}:/opt/harmony-clt:ro
+
+  # 只运行管理员维护 Job 的固定 master 脚本；品牌源码不能接触此节点的签名材料。
+  ohos-maintenance:
+    image: sxmqlive-jenkins-ohos-agent:clt26-jdk21
+    container_name: sxmqlive-jenkins-ohos-maintenance-agent
+    restart: unless-stopped
+    init: true
+    depends_on:
+      ohos-volumes-init:
+        condition: service_completed_successfully
+      controller:
+        condition: service_healthy
+    environment:
+      JENKINS_URL: http://controller:8080
+      JENKINS_AGENT_NAME: signing-maintenance
+      JENKINS_AGENT_SECRET_FILE: /run/jenkins-ohos-maintenance-bootstrap/agent.secret
+      JENKINS_AGENT_WORKDIR: /home/jenkins/agent
+      GRADLE_USER_HOME: /home/jenkins/.gradle
+      HARMONY_CLT_HOME: /opt/harmony-clt
+      SIGNING_MAINTENANCE_ROOT: /home/jenkins/signing
+    volumes:
+      - jenkins_ohos_maintenance_secret:/run/jenkins-ohos-maintenance-bootstrap:ro
+      - type: volume
+        source: jenkins_ohos_maintenance_work
+        target: /home/jenkins/agent
+        volume:
+          nocopy: true
+      - ohos_maintenance_gradle_cache:/home/jenkins/.gradle
+      - ohos_signing:/home/jenkins/signing
+      - ${OHOS_CLT_HOST_DIR:?先安装并验证冻结官方Linux CLT}:/opt/harmony-clt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /run/jenkins-ohos-maintenance-bootstrap/agent.secret && pgrep -f 'agent.jar' >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 1g
+
+volumes:
+  jenkins_ohos_agent_secret:
+    name: sxmqlive_jenkins_ohos_agent_secret
+  jenkins_ohos_agent_work:
+    name: sxmqlive_jenkins_ohos_agent_work
+  ohos_gradle_cache:
+    name: sxmqlive_ohos_gradle_cache
+  ohos_signing:
+    name: sxmqlive_ohos_signing
+  jenkins_ohos_maintenance_secret:
+    name: sxmqlive_jenkins_ohos_maintenance_secret
+  jenkins_ohos_maintenance_work:
+    name: sxmqlive_jenkins_ohos_maintenance_work
+  ohos_maintenance_gradle_cache:
+    name: sxmqlive_ohos_maintenance_gradle_cache
+  linux_build_memory:
+    name: sxmqlive_linux_build_memory

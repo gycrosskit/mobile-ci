@@ -1,0 +1,33 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>监听 master 合并，只更新 Wiki 首页导航，不复制正文。SCM 每两分钟轮询，每十五分钟幂等校准；导航无变化不提交，仅绑定 Git SSH 凭据。</description>
+  <displayName>Wiki 文档导航同步</displayName>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs>
+        <hudson.plugins.git.UserRemoteConfig>
+          <url>git@gitee.com:example/legacy-automation.git</url>
+          <credentialsId>fixture-scm</credentialsId>
+        </hudson.plugins.git.UserRemoteConfig>
+      </userRemoteConfigs>
+      <branches><hudson.plugins.git.BranchSpec><name>__CI_AUTOMATION_COMMIT__</name></hudson.plugins.git.BranchSpec></branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <submoduleCfg class="empty-list"/>
+      <gitTool>Default</gitTool>
+      <!-- 所有 master 提交均可恢复过期构建，不能用路径过滤漏掉后续代码提交。 -->
+      <extensions/>
+    </scm>
+    <scriptPath>jenkins/Jenkinsfile.wiki-navigation</scriptPath>
+    <lightweight>false</lightweight>
+  </definition>
+  <triggers>
+    <hudson.triggers.SCMTrigger><spec>H/2 * * * *</spec><ignorePostCommitHooks>false</ignorePostCommitHooks></hudson.triggers.SCMTrigger>
+    <hudson.triggers.TimerTrigger><spec>H/15 * * * *</spec></hudson.triggers.TimerTrigger>
+  </triggers>
+  <!-- 生成脚本进入 master 且 SSH Wiki 写权限通过后才启用。 -->
+  <disabled>true</disabled>
+</flow-definition>

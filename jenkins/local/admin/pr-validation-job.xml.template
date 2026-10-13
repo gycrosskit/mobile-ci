@@ -1,0 +1,44 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>Gitee MR 门禁：从受信 master 加载 Jenkinsfile，验证预合并引用并执行确定性测试、文档校验和代表品牌编译。禁止自动修复与自动合并。</description>
+  <displayName>Gitee MR 确定性验证</displayName>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <jenkins.model.BuildDiscarderProperty>
+      <strategy class="hudson.tasks.LogRotator">
+        <daysToKeep>30</daysToKeep>
+        <numToKeep>80</numToKeep>
+        <artifactDaysToKeep>30</artifactDaysToKeep>
+        <artifactNumToKeep>30</artifactNumToKeep>
+        <removeLastBuild>false</removeLastBuild>
+      </strategy>
+    </jenkins.model.BuildDiscarderProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs>
+        <hudson.plugins.git.UserRemoteConfig>
+          <url>git@gitee.com:example/legacy-automation.git</url>
+          <credentialsId>fixture-scm</credentialsId>
+        </hudson.plugins.git.UserRemoteConfig>
+      </userRemoteConfigs>
+      <branches>
+        <hudson.plugins.git.BranchSpec><name>__CI_AUTOMATION_COMMIT__</name></hudson.plugins.git.BranchSpec>
+      </branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <submoduleCfg class="empty-list"/>
+      <browser class="hudson.plugins.git.browser.Gitee" plugin="git">
+        <url>https://gitee.com/example/legacy-automation</url>
+      </browser>
+      <gitTool>Default</gitTool>
+      <extensions/>
+    </scm>
+    <scriptPath>jenkins/Jenkinsfile.pr-validation</scriptPath>
+    <lightweight>false</lightweight>
+  </definition>
+  <triggers/>
+  <!-- Gitee API Token 与两个 Secret text Credential 就绪并重启 Controller 后由 init.groovy 自动配置。 -->
+  <disabled>true</disabled>
+</flow-definition>

@@ -1,0 +1,244 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<!-- 分支/Tag 选择器由 generate_jenkins_job_templates.py 从 jenkins/selectors/ 生成，请修改规范文本。 -->
+<flow-definition plugin="workflow-job">
+  <actions/>
+  <description>iOS 测试包：选择品牌、分支和蒲公英/TestFlight 分发渠道；固定使用 Release 优化与测试环境，默认上传并通知。</description>
+  <displayName>iOS QA 测试包</displayName>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <jenkins.model.BuildDiscarderProperty>
+      <strategy class="hudson.tasks.LogRotator">
+        <daysToKeep>14</daysToKeep>
+        <numToKeep>20</numToKeep>
+        <artifactDaysToKeep>14</artifactDaysToKeep>
+        <artifactNumToKeep>5</artifactNumToKeep>
+        <removeLastBuild>false</removeLastBuild>
+      </strategy>
+    </jenkins.model.BuildDiscarderProperty>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>UI_ENGINE</name>
+          <description>选择 UI 宿主；默认 CMP，Kuikly 要求目标分支或 Tag 已接入对应打包脚本。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>cmp</string>
+              <string>kuikly</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>BRAND</name>
+          <description>选择已在 ci/brands.json 登记 iOS Target 的品牌。</description>
+          <!-- 由 generate_jenkins_job_templates.py 根据 ci/brands.json 维护，请勿手工增删。 -->
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>miaoshou</string>
+              <string>kangmin</string>
+              <string>dgtang</string>
+              <string>jishi</string>
+              <string>jimin</string>
+              <string>jingcheng</string>
+              <string>boai</string>
+              <string>cihang</string>
+              <string>hehekang</string>
+              <string>chonghe</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>BRANCH_TYPE</name>
+          <description>选择要构建的分支类型，分支下拉框会自动联动刷新。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>feature</string>
+              <string>dev</string>
+              <string>release</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <org.biouno.unochoice.CascadeChoiceParameter plugin="uno-choice">
+          <name>GIT_BRANCH</name>
+          <description>只显示所选品牌和类型的远程分支，可输入关键字继续过滤。</description>
+          <randomName>choice-parameter-ios-git-branch</randomName>
+          <visibleItemCount>1</visibleItemCount>
+          <script class="org.biouno.unochoice.model.GroovyScript">
+            <secureScript>
+              <script>import net.uaznia.lukanus.hudson.plugins.gitparameter.GitParameterDefinition
+import net.uaznia.lukanus.hudson.plugins.gitparameter.SelectedValue
+import net.uaznia.lukanus.hudson.plugins.gitparameter.jobs.JobWrapperFactory
+import jenkins.model.Jenkins
+
+def jobName = '__JOB_NAME__'
+// 品牌白名单由 generate_jenkins_job_templates.py 生成，避免参数页和 ci/brands.json 漂移。
+def allowedBrands = ['miaoshou', 'kangmin', 'dgtang', 'jishi', 'jimin', 'jingcheng', 'boai', 'cihang', 'hehekang', 'chonghe']
+def brand = 'miaoshou'
+def branchType = 'feature'
+try {
+    brand = BRAND?.toString() ?: brand
+} catch (MissingPropertyException ignored) {
+    // 首次渲染参数页时，Active Choices 可能尚未注入引用参数。
+}
+try {
+    branchType = BRANCH_TYPE?.toString() ?: branchType
+} catch (MissingPropertyException ignored) {
+    // 保持界面中两个 Choice 参数的默认值。
+}
+if (!allowedBrands.contains(brand)) {
+    return ['请先选择品牌:selected']
+}
+def job = Jenkins.get().getItemByFullName(jobName)
+if (job == null) {
+    return ['测试任务不存在:selected']
+}
+job.checkPermission(hudson.model.Item.BUILD)
+def parameter = new GitParameterDefinition(
+    'DISCOVERED_BRANCH',
+    'PT_BRANCH',
+    '',
+    '',
+    '',
+    'origin/(.*)',
+    '*',
+    null,
+    SelectedValue.NONE,
+    '{{CI_APP_REPO_PATTERN}}',
+    false
+)
+def wrapper = JobWrapperFactory.createJobWrapper(job)
+def scm = new hudson.plugins.git.GitSCM(
+    [new hudson.plugins.git.UserRemoteConfig('{{CI_APP_SSH}}', 'origin', '+refs/heads/*:refs/remotes/origin/*', '{{CI_CREDENTIAL_SCM}}')],
+    [], null, null, []
+)
+def branches = parameter.generateContents(wrapper, [scm]).values.collect { org.biouno.unochoice.util.SafeHtmlExtendedMarkupFormatter.INSTANCE.translate(it.value.toString()) }
+
+if (branchType == 'feature') {
+    branches = branches.findAll { it.startsWith("feature/${brand}/") }
+} else if (branchType == 'dev') {
+    branches = branches.findAll { it == "dev/${brand}" }
+} else if (branchType == 'release') {
+    branches = branches.findAll { it.startsWith("release/${brand}-") }
+} else {
+    return ['请先选择分支类型:selected']
+}
+
+return branches.sort() ?: ['该类型暂无远程分支:selected']</script>
+              <sandbox>false</sandbox>
+            </secureScript>
+            <secureFallbackScript>
+              <script>return ['分支加载失败，请联系 Jenkins 管理员:selected']</script>
+              <sandbox>true</sandbox>
+            </secureFallbackScript>
+          </script>
+          <projectName>__JOB_NAME__</projectName>
+          <projectFullName>__JOB_NAME__</projectFullName>
+          <parameters class="linked-hash-map"/>
+          <referencedParameters>BRAND,BRANCH_TYPE</referencedParameters>
+          <choiceType>PT_SINGLE_SELECT</choiceType>
+          <filterable>true</filterable>
+          <filterLength>1</filterLength>
+        </org.biouno.unochoice.CascadeChoiceParameter>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>TEST_CHANNEL</name>
+          <description>测试分发渠道二选一：蒲公英使用 Ad Hoc 签名；TestFlight 使用 App Store 签名并上传 App Store Connect。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string>pgyer</string>
+              <string>testflight</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <org.biouno.unochoice.DynamicReferenceParameter plugin="uno-choice">
+          <name>可选设置</name>
+          <description></description>
+          <randomName>choice-parameter-optional-settings</randomName>
+          <visibleItemCount>1</visibleItemCount>
+          <script class="org.biouno.unochoice.model.GroovyScript">
+            <secureScript plugin="script-security">
+              <script><![CDATA[return '''<details id="{{CI_PROJECT_ID}}-optional-settings"><summary>展开可选设置（更新说明 / 禅道关联）</summary></details>
+<style>
+form:has(#{{CI_PROJECT_ID}}-optional-settings:not([open])) .jenkins-form-item:has(div[name="parameter"] > input[name="name"][value="UPDATE_DESCRIPTION"]),
+form:has(#{{CI_PROJECT_ID}}-optional-settings:not([open])) .jenkins-form-item:has(div[name="parameter"] > input[name="name"][value="WORK_ITEM_TYPE"]),
+form:has(#{{CI_PROJECT_ID}}-optional-settings:not([open])) .jenkins-form-item:has(div[name="parameter"] > input[name="name"][value="WORK_ITEM_ID"]),
+form:has(#{{CI_PROJECT_ID}}-optional-settings:not([open])) .jenkins-form-item:has(div[name="parameter"] > input[name="name"][value="WORK_ITEM_URL"]) { display: none; }
+</style>''']]></script>
+              <sandbox>false</sandbox>
+            </secureScript>
+            <secureFallbackScript plugin="script-security">
+              <script>return ''</script>
+              <sandbox>true</sandbox>
+            </secureFallbackScript>
+          </script>
+          <parameters class="linked-hash-map"/>
+          <referencedParameters></referencedParameters>
+          <choiceType>ET_FORMATTED_HTML</choiceType>
+          <omitValueField>true</omitValueField>
+        </org.biouno.unochoice.DynamicReferenceParameter>
+        <hudson.model.TextParameterDefinition>
+          <name>UPDATE_DESCRIPTION</name>
+          <description>可选：手动填写本次更新内容，留空则自动读取所选分支最近的 Git Commit。</description>
+          <defaultValue></defaultValue>
+          <trim>false</trim>
+        </hudson.model.TextParameterDefinition>
+        <hudson.model.ChoiceParameterDefinition>
+          <name>WORK_ITEM_TYPE</name>
+          <description>可选：关联禅道工作项类型；不关联时留空。</description>
+          <choices class="java.util.Arrays$ArrayList">
+            <a class="string-array">
+              <string></string>
+              <string>story</string>
+              <string>bug</string>
+              <string>task</string>
+              <string>requirement</string>
+              <string>epic</string>
+            </a>
+          </choices>
+        </hudson.model.ChoiceParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>WORK_ITEM_ID</name>
+          <description>可选：禅道工作项数字 ID；类型、ID、链接必须同时填写。</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>WORK_ITEM_URL</name>
+          <description>可选：禅道工作项 HTTPS 链接；只写入构建记录和钉钉通知，不修改禅道。</description>
+          <defaultValue></defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.BooleanParameterDefinition>
+          <name>UPLOAD_AND_NOTIFY</name>
+          <description>true 上传并通知；false 只验证构建和签名，不上传、不读取通知凭据。</description>
+          <defaultValue>true</defaultValue>
+        </hudson.model.BooleanParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs>
+        <hudson.plugins.git.UserRemoteConfig>
+          <url>{{CI_CI_CHECKOUT_URL}}</url>
+          <credentialsId>{{CI_CI_CHECKOUT_CREDENTIAL}}</credentialsId>
+        </hudson.plugins.git.UserRemoteConfig>
+      </userRemoteConfigs>
+      <branches>
+        <hudson.plugins.git.BranchSpec>
+          <name>__CI_AUTOMATION_COMMIT__</name>
+        </hudson.plugins.git.BranchSpec>
+      </branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <submoduleCfg class="empty-list"/>
+      <browser class="{{CI_CI_BROWSER_CLASS}}" plugin="git">
+        <url>{{CI_CI_WEB}}</url>
+      </browser>
+      <gitTool>Default</gitTool>
+      <extensions/>
+    </scm>
+    <scriptPath>jenkins/Jenkinsfile.ios.test</scriptPath>
+    <lightweight>false</lightweight>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>

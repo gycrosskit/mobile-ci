@@ -1,0 +1,279 @@
+def ciFailureStage = 'Pipeline Initialization'
+def ciContextValidated = false
+
+pipeline {
+    agent { label 'pr-builder && !ios-pr-builder' }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '80'))
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
+
+    environment {
+        CI_PROJECT_ID = '{{CI_PROJECT_ID}}'
+        CI_AUTOMATION_COMMIT = '__CI_AUTOMATION_COMMIT__'
+        APP_REPOSITORY_URL = '{{CI_APP_SSH}}'
+        CI_REPOSITORY_URL = '{{CI_CI_CHECKOUT_URL}}'
+    }
+
+    stages {
+        stage('Validate Webhook Context') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    if (!(env.giteePullRequestIid ==~ /[1-9][0-9]*/)) {
+                        error('缺少合法的 giteePullRequestIid；本任务只接受 Gitee Pull Request Webhook。')
+                    }
+                    if (env.giteeTargetBranch != '{{CI_ROLE_BRANCH}}') {
+                        error('MR 目标分支必须是 {{CI_ROLE_BRANCH}}。')
+                    }
+                    def context = new groovy.json.JsonSlurperClassic().parseText(env.jsonBody ?: '{}')
+                    // Gitee 插件回填评论使用 repo，缺失时使用 pull_request.base.repo。
+                    def commentRepository = context.repo != null ? context.repo?.path_with_namespace : context.pull_request?.base?.repo?.path_with_namespace
+                    def repositoryIdentities = [commentRepository, context.repository?.path_with_namespace].findAll { it != null }
+                    if (commentRepository != '{{CI_APP_IDENTITY}}' || repositoryIdentities.any { it != '{{CI_APP_IDENTITY}}' } ||
+                        env.giteeTargetNamespace != '{{CI_ROLE_NAMESPACE}}' ||
+                        !(env.giteeTargetRepoSshUrl == env.APP_REPOSITORY_URL || env.giteeTargetRepoHttpUrl in [
+                            '{{CI_APP_WEB}}',
+                            '{{CI_APP_HTTPS}}'])) {
+                        error('Webhook 必须来自固定应用仓库；拒绝其他仓库或缺失身份的请求。')
+                    }
+                    def headSha = context.pull_request?.head?.sha
+                    if (!(headSha instanceof String) || !(headSha ==~ /[0-9a-f]{40}/)) {
+                        error('缺少合法 MR 源提交。')
+                    }
+                    env.CI_EXPECTED_HEAD = headSha
+                    ciContextValidated = true
+                }
+            }
+        }
+
+        stage('Checkout Automation') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    deleteDir()
+                    dir('automation') {
+                        if (!(env.CI_AUTOMATION_COMMIT ==~ /[0-9a-f]{40}/)) { error '必须固定已审 CI Commit' }
+                        def reviewedCheckout = checkout(changelog: false, poll: false, scm: [
+                            $class: 'GitSCM', branches: [[name: env.CI_AUTOMATION_COMMIT]],
+                            doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [],
+                            userRemoteConfigs: [[credentialsId: '{{CI_CI_CHECKOUT_CREDENTIAL}}', url: env.CI_REPOSITORY_URL]]
+                        ])
+                        env.CI_AUTOMATION_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        if (reviewedCheckout.GIT_URL != env.CI_REPOSITORY_URL || reviewedCheckout.GIT_COMMIT != env.CI_AUTOMATION_COMMIT ||
+                            env.CI_AUTOMATION_SHA != env.CI_AUTOMATION_COMMIT) { error '受信 CI 仓库或实际提交不匹配' }
+                    }
+                    env.CI_TOOL_ROOT = "${pwd()}/automation"
+                    env.APP_SOURCE_ROOT = "${pwd()}/source"
+                    env.PYTHONPATH = env.CI_TOOL_ROOT
+                }
+            }
+        }
+
+        stage('Checkout Pull Request Merge') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    dir('source') {
+                        checkout(changelog: true, poll: false, scm: [
+                            $class: 'GitSCM',
+                            branches: [[name: "pull/${env.giteePullRequestIid}/MERGE"]],
+                            doGenerateSubmoduleConfigurations: false,
+                            extensions: [],
+                            submoduleCfg: [],
+                            userRemoteConfigs: [[
+                                credentialsId: '{{CI_CREDENTIAL_SCM}}',
+                                refspec: '+refs/heads/{{CI_ROLE_BRANCH}}:refs/remotes/origin/{{CI_ROLE_BRANCH}} +refs/pull/*/MERGE:refs/pull/*/MERGE',
+                                url: env.APP_REPOSITORY_URL
+                            ]]
+                        ])
+                        // MERGE 的第一父提交是本次实际验证的目标分支快照；工具版本独立固定。
+                        env.CI_MERGE_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        env.CI_BASE_SHA = sh(script: 'git rev-parse HEAD^1', returnStdout: true).trim()
+                        sh '''
+                            set -eu
+                            test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/pull/$giteePullRequestIid/MERGE")"
+                            git merge-base --is-ancestor "$CI_EXPECTED_HEAD" HEAD
+                            git diff --check "$CI_BASE_SHA"...HEAD
+                        '''
+                        def contractJson = sh(
+                            script: 'python3 "$CI_TOOL_ROOT/jenkins/check_repository_contract.py" --app-root "$APP_SOURCE_ROOT" --base-ref "$CI_BASE_SHA" --project="$CI_PROJECT_ID"',
+                            returnStdout: true
+                        ).trim()
+                        // sh 会暂停并序列化 CPS 状态，解析器必须在 shell 返回后创建。
+                        def contract = new groovy.json.JsonSlurperClassic().parseText(contractJson)
+                        if (contract.ciSha != env.CI_AUTOMATION_SHA || contract.appSha != env.CI_MERGE_SHA || contract.ciDirty || contract.appDirty) {
+                            error('应用/CI 接口证据与实际检出提交不一致，或工作区含未提交内容。')
+                        }
+                        env.APP_TOOL_DIR = contract.toolDir
+                        env.APP_TEST_DIR = contract.testDir
+                        env.APP_DOCS_CHECK = contract.docsCheck.toString()
+                        echo "Application ${contract.appSha}; CI ${contract.ciSha}; interface ${contract.contractVersion}; docs check ${contract.docsCheck}"
+                        env.ANDROID_VALIDATION_REQUIRED = contract.checks.android?.contains('affected_gradle_tests.py') ? 'true' : 'false'
+                        env.IOS_VALIDATION_REQUIRED = 'false'
+                        env.IOS_BRIDGE_VALIDATION_REQUIRED = 'false'
+                        env.OHOS_VALIDATION_REQUIRED = 'false'
+                        if (contract.checks.ios?.contains('affected_ios_host_builds.py')) {
+                            env.IOS_VALIDATION_REQUIRED = sh(
+                                script: 'python3 "$APP_TOOL_DIR/affected_ios_host_builds.py" --base-ref "$CI_BASE_SHA" --required-only',
+                                returnStdout: true).trim()
+                            if (contract.checks.ios.contains('test_ios_bridge_logic.sh')) {
+                                env.IOS_BRIDGE_VALIDATION_REQUIRED = sh(
+                                    script: 'python3 "$APP_TOOL_DIR/affected_ios_host_builds.py" --base-ref "$CI_BASE_SHA" --bridge-required-only',
+                                    returnStdout: true).trim()
+                            }
+                        }
+                        if (contract.checks.harmony?.contains('affected_ohos_contracts.py')) {
+                            env.OHOS_VALIDATION_REQUIRED = sh(
+                                script: 'python3 "$APP_TOOL_DIR/affected_ohos_contracts.py" --base-ref "$CI_BASE_SHA" --required-only',
+                                returnStdout: true).trim()
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deterministic Quality Gate') {
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                sh '''
+                    set -eu
+                    # CI 自身测试由 CI MR 门禁执行；应用只消费已通过门禁的固定版本。
+                    cd "$APP_SOURCE_ROOT"
+                    python3 -m unittest discover -b -s "$APP_TEST_DIR" -p 'test_*.py'
+                    if [ "${APP_DOCS_CHECK:-false}" = true ]; then
+                        python3 "$APP_TOOL_DIR/check_repository_docs.py"
+                    else
+                        echo "历史应用没有文档检查接口；未执行应用文档检查。"
+                    fi
+                '''
+            }
+        }
+
+        stage('Affected OHOS Contracts') {
+            when { expression { env.OHOS_VALIDATION_REQUIRED == 'true' } }
+            environment {
+                CI = 'true'
+                GRADLE_USER_HOME = '/home/jenkins/.gradle'
+            }
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                sh '''
+                    set -eu
+                    cd "$APP_SOURCE_ROOT"
+                    if [ ! -f "$APP_TOOL_DIR/install_ohos_contract_tools.sh" ]; then
+                        export OHOS_CONTRACT_TOOLS="${OHOS_CONTRACT_TOOLS:-$APP_SOURCE_ROOT/build/ohos-contract-tools}"
+                        bash "$CI_TOOL_ROOT/jenkins/install_ohos_contract_tools.sh" "$OHOS_CONTRACT_TOOLS"
+                    fi
+                    python3 "$APP_TOOL_DIR/affected_ohos_contracts.py" --base-ref "$CI_BASE_SHA" --execute
+                '''
+            }
+        }
+
+        stage('Affected Business Unit Tests') {
+            when { expression { env.ANDROID_VALIDATION_REQUIRED == 'true' } }
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                sh '''
+                    set -eu
+                    cd "$APP_SOURCE_ROOT"
+                    selected_tasks="$(python3 "$APP_TOOL_DIR/affected_gradle_tests.py" --base-ref "$CI_BASE_SHA")"
+                    if [ -n "$selected_tasks" ]; then
+                        sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+                        test -n "$sdk_root"
+                        test -d "$sdk_root/platforms/android-36"
+                        java -version
+                        bash "$CI_TOOL_ROOT/delivery/with_linux_build_memory.sh" python3 "$APP_TOOL_DIR/affected_gradle_tests.py" \
+                            --base-ref "$CI_BASE_SHA" \
+                            --execute
+                    else
+                        echo "没有受影响的 Android Gradle 任务，跳过 SDK 检查与 Gradle。"
+                    fi
+                '''
+            }
+        }
+
+        stage('Affected iOS Host Validation') {
+            when {
+                beforeAgent true
+                expression { env.IOS_VALIDATION_REQUIRED == 'true' || env.IOS_BRIDGE_VALIDATION_REQUIRED == 'true' }
+            }
+            agent { label 'mac-build && ios-pr-builder' }
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    deleteDir()
+                    dir('automation') {
+                        checkout(changelog: false, poll: false, scm: [
+                            $class: 'GitSCM', branches: [[name: env.CI_AUTOMATION_SHA]],
+                            doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [],
+                            userRemoteConfigs: [[credentialsId: '{{CI_CI_CHECKOUT_CREDENTIAL}}', url: env.CI_REPOSITORY_URL]]
+                        ])
+                        sh 'test "$(git rev-parse HEAD)" = "$CI_AUTOMATION_SHA"'
+                    }
+                    env.CI_TOOL_ROOT = "${pwd()}/automation"
+                    env.APP_SOURCE_ROOT = "${pwd()}/source"
+                    env.PYTHONPATH = env.CI_TOOL_ROOT
+                    dir('source') {
+                        checkout(changelog: false, poll: false, scm: [
+                            $class: 'GitSCM',
+                            branches: [[name: "pull/${env.giteePullRequestIid}/MERGE"]],
+                            doGenerateSubmoduleConfigurations: false,
+                            extensions: [], submoduleCfg: [],
+                            userRemoteConfigs: [[
+                                credentialsId: '{{CI_CREDENTIAL_SCM}}',
+                                refspec: '+refs/heads/{{CI_ROLE_BRANCH}}:refs/remotes/origin/{{CI_ROLE_BRANCH}} +refs/pull/*/MERGE:refs/pull/*/MERGE',
+                                url: env.APP_REPOSITORY_URL
+                            ]]
+                        ])
+                    }
+                }
+                sh '''
+                    set -eu
+                    cd "$APP_SOURCE_ROOT"
+                    test "$(git rev-parse HEAD)" = "$CI_MERGE_SHA"
+                    test "$(git rev-parse HEAD^1)" = "$CI_BASE_SHA"
+                    if [ "$IOS_BRIDGE_VALIDATION_REQUIRED" = true ]; then
+                        bash "$APP_TOOL_DIR/test_ios_bridge_logic.sh"
+                    fi
+                    if [ "$IOS_VALIDATION_REQUIRED" = true ]; then
+                        python3 "$APP_TOOL_DIR/affected_ios_host_builds.py" \
+                            --base-ref "$CI_BASE_SHA" \
+                            --execute
+                    fi
+                '''
+            }
+        }
+
+    }
+
+    post {
+        success {
+            script {
+                if (ciContextValidated && env.giteePullRequestIid ==~ /[1-9][0-9]*/) {
+                    try {
+                        def docsResult = env.APP_DOCS_CHECK == 'true' ? '应用文档检查通过' : '历史应用未执行文档检查'
+                        addGiteeMRComment(comment: "### ✅ Jenkins MR 门禁通过\n\n构建：`${env.JOB_NAME} #${env.BUILD_NUMBER}`\n\n应用 ${env.CI_MERGE_SHA}；CI ${env.CI_AUTOMATION_SHA}。${docsResult}。Git 差异、应用/CI 接口、确定性检查、受影响 Gradle 业务单测及按需 iOS/OHOS 契约均已通过。")
+                    } catch (Exception ignored) {
+                        echo 'Gitee MR success comment could not be sent; successful result is preserved.'
+                    }
+                }
+            }
+        }
+        failure {
+            script {
+                if (ciContextValidated && env.giteePullRequestIid ==~ /[1-9][0-9]*/) {
+                    try {
+                        addGiteeMRComment(comment: "### Jenkins MR 门禁失败\n\n失败阶段：`${ciFailureStage}`\n\n[查看 Jenkins 构建详情](${env.BUILD_URL})")
+                    } catch (Exception ignored) {
+                        echo 'Gitee MR failure comment could not be sent; original result is preserved.'
+                    }
+                }
+            }
+        }
+    }
+}

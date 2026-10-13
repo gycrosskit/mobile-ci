@@ -1,0 +1,18 @@
+{
+  "example": {
+    "displayName": "Example Mobile",
+    "testers": [],
+    "pgyerChannels": {},
+    "android": {
+      "signing": {
+        "source": "jenkins",
+        "keyAlias": "example-test-only",
+        "certificateSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "credentials": {
+          "keystore": "example-mobile-test-keystore",
+          "signingJson": "example-mobile-test-signing-json"
+        }
+      }
+    }
+  }
+}

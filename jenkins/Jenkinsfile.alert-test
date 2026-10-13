@@ -1,0 +1,61 @@
+def ciFailureStage = 'Pipeline Initialization'
+def alertConfirmed = false
+
+pipeline {
+    agent { label 'linux-build' }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 10, unit: 'MINUTES')
+    }
+
+    parameters {
+        booleanParam(name: 'CONFIRM_FAILURE_ALERT', defaultValue: false, description: '确认本次构建将故意失败并发送真实钉钉告警')
+        string(name: 'CONFIRM_TEXT', defaultValue: '', description: '必须输入 SEND_CONTROLLED_FAILURE')
+    }
+
+    environment {
+        CI_FAILURE_STAGE = 'Pipeline Initialization'
+    }
+
+    stages {
+        stage('Checkout Master') {
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                dir('automation') {
+                    checkout(changelog: false, poll: false, scm: scm)
+                    script { env.CI_TOOL_ROOT = pwd() }
+                }
+            }
+        }
+        stage('Controlled Failure') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    if (!params.CONFIRM_FAILURE_ALERT || params.CONFIRM_TEXT != 'SEND_CONTROLLED_FAILURE') {
+                        error('未满足受控失败确认条件；拒绝发送测试告警。')
+                    }
+                    alertConfirmed = true
+                    error('受控失败：用于验收 Jenkins 到钉钉的真实告警链路。')
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            script {
+                if (!alertConfirmed) {
+                    echo '告警确认未通过，跳过真实通知。'
+                    return
+                }
+                try {
+                    load("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy").send('Operations', 'FAILURE', ciFailureStage)
+                } catch (Exception ignored) {
+                    echo 'Controlled failure notification could not be sent; original result is preserved.'
+                }
+            }
+        }
+    }
+}

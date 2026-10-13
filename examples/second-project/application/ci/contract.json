@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "requiredCiCapabilities": [
+    "app-layout-v1"
+  ],
+  "toolDir": "ci/scripts",
+  "testDir": "ci/tests",
+  "requiredAppFiles": [
+    "gradlew",
+    "settings.gradle",
+    "build.gradle",
+    "mobile/build.gradle",
+    "mobile/src/main/AndroidManifest.xml",
+    "ci/brands.json",
+    "ci/scripts/affected_gradle_tests.py",
+    "ci/tests/test_manifest_contract.py"
+  ]
+}

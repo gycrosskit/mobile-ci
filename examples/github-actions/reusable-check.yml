@@ -1,0 +1,50 @@
+name: Reusable public CI reference checks
+
+'on':
+  workflow_call:
+    inputs:
+      project-id:
+        description: Public fixture identity; only example-mobile is supported
+        required: false
+        default: example-mobile
+        type: string
+    # 公开检查没有需要传入的 secret；发布流程必须另设受信入口。
+    secrets: {}
+
+permissions:
+  contents: read
+
+jobs:
+  public-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GROOVY_TEST_CLASSPATH: /tmp/ci-reference/groovy-all-2.4.21.jar
+    steps:
+      - name: Validate fixed public example identity
+        env:
+          EXAMPLE_PROJECT_ID: ${{ inputs.project-id }}
+        run: test "$EXAMPLE_PROJECT_ID" = example-mobile
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11.9'
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21.0.11+10'
+      - name: Install checksum-locked Groovy test runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ci-reference
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/org/codehaus/groovy/groovy-all/2.4.21/groovy-all-2.4.21.jar \
+            --output "$GROOVY_TEST_CLASSPATH"
+          echo "de65260cf2070442e99882f2f3d72e7531725c1e6a257446cc0cea525c607bd0  $GROOVY_TEST_CLASSPATH" | sha256sum --check -
+          chmod 0444 "$GROOVY_TEST_CLASSPATH"
+          java -cp "$GROOVY_TEST_CLASSPATH" groovy.ui.GroovyMain -e "assert GroovySystem.version == '2.4.21'"
+      - name: Validate clean source, second project and public security contracts
+        run: python3 jenkins/run_public_checks.py

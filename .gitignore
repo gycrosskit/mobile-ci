@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+build/
+.DS_Store
+.env
+local.properties
+/jenkins/local/runtime/
+/jenkins/remote/.env
+/jenkins/remote/runtime/
+/jenkins/remote/backups/
+/delivery/fastlane/README.md
+/delivery/fastlane/report.xml

@@ -1,0 +1,474 @@
+import com.cloudbees.groovy.cps.NonCPS
+import com.cloudbees.plugins.credentials.CredentialsScope
+import com.cloudbees.plugins.credentials.SecretBytes
+import com.cloudbees.plugins.credentials.CredentialsProvider
+import com.cloudbees.hudson.plugins.folder.Folder
+import com.cloudbees.plugins.credentials.domains.Domain
+import groovy.json.JsonSlurperClassic
+import hudson.BulkChange
+import hudson.FilePath
+import hudson.model.Cause
+import hudson.model.User
+import jenkins.model.Jenkins
+import org.jenkinsci.plugins.plaincredentials.impl.FileCredentialsImpl
+import org.jenkinsci.plugins.plaincredentials.impl.StringCredentialsImpl
+import hudson.util.Secret
+import java.security.MessageDigest
+
+@NonCPS
+void assertMaintenanceAccess(def run, boolean requireIdle) {
+    def jenkins = Jenkins.get()
+    def cause = run.getCause(Cause.UserIdCause.class)
+    def user = cause?.getUserId() ? User.getById(cause.getUserId(), false) : null
+    if (run.getParent().getFullName() != 'mobile-apps/sxmqlive-signing-maintenance' || user == null ||
+        !jenkins.getACL().hasPermission2(user.impersonate2(), Jenkins.ADMINISTER)) {
+        throw new IllegalStateException('签名材料同步仅允许固定维护 Job 的实际管理员发起者')
+    }
+    if (!requireIdle) { return }
+    def otherBuild = jenkins.computers.any { computer ->
+        (computer.executors + computer.oneOffExecutors).any { executor ->
+            def executable = executor.currentExecutable
+            executable != null && executable != run && executable.getParent().getOwnerExecutable() != run
+        }
+    }
+    // 定时只读备份在同一单 Executor 节点排队，不会并发修改材料。
+    if (otherBuild || jenkins.queue.items.any { it.task.fullName != '运维/sxmqlive-signing-backup' }) {
+        throw new IllegalStateException('存在其他构建或队列；拒绝签名维护与凭据更新')
+    }
+}
+
+@NonCPS
+Map signingCredentialStore(def jenkins, Collection ids) {
+    def provider = jenkins.getItemByFullName('mobile-apps', Folder.class)
+    if (provider == null) { throw new IllegalStateException('mobile-apps-folder-missing') }
+    def stores = CredentialsProvider.lookupStores(provider).findAll { it.context == provider }
+    if (stores.size() != 1) { throw new IllegalStateException('mobile-apps-store-missing') }
+    def store = stores[0]
+    def shadow = CredentialsProvider.lookupStores(jenkins).findAll { it.context == jenkins }.any { rootStore ->
+        rootStore.domains.any { domain -> rootStore.getCredentials(domain).any { it.id in ids } }
+    } || store.domains.findAll { it != Domain.global() }.any { domain -> store.getCredentials(domain).any { it.id in ids } }
+    if (shadow) { throw new IllegalStateException('签名凭据存在 root 或非默认 Domain 同 ID；须先完成迁移') }
+    return [provider: provider, store: store]
+}
+
+@NonCPS
+Map maintenanceCredentials(def run, String nodeName, String workspace, String brand, Map snapshot = null, String platform = 'harmony', boolean requireIdle = true) {
+    assertMaintenanceAccess(run, requireIdle)
+    def jenkins = Jenkins.get()
+    def computer = jenkins.getComputer(nodeName)
+    def isIOS = platform == 'ios'
+    if (!(platform in ['ios', 'harmony']) || nodeName != 'signing-maintenance' || computer == null || computer.channel == null || !(brand ==~ /[a-z][a-z0-9_]*/)) {
+        throw new IllegalStateException('维护节点或品牌无效')
+    }
+    def root = new FilePath(computer.channel, workspace)
+    def config = new JsonSlurperClassic().parseText(root.child('ci/brands.json').readToString())
+    def team = isIOS ? config[brand]?.ios?.signing?.test?.team : config[brand]?.harmony?.teamKey
+    def teams = isIOS ? config._iosTeams : config._harmonyTeams
+    def namespace = teams[team]?.credentialNamespace
+    if (!(team instanceof String) || !(team ==~ /[a-z][a-z0-9_-]*/) || !(namespace instanceof String) || !(namespace ==~ /[a-z][a-z0-9-]*/) ||
+        teams.any { key, value -> key != team && value.credentialNamespace == namespace }) {
+        throw new IllegalStateException('维护凭据命名空间必须来自固定 master 品牌配置')
+    }
+    def names = isIOS ? [(namespace + '-distribution-p12'): 'distribution.p12',
+                         (namespace + '-distribution-p12-password'): null] : [(namespace + '-release-p12'): 'release.p12',
+                 (namespace + '-' + brand + '-designated-release-profile'): 'designated-release.p7b',
+                 (namespace + '-' + brand + '-devices-json'): 'devices.json']
+    def context = signingCredentialStore(jenkins, names.keySet())
+    def provider = context.provider
+    def store = context.store
+    def domain = Domain.global()
+    def digest = { byte[] bytes -> MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString() }
+    def current = { String id ->
+        def matches = store.getCredentials(domain).findAll { it.id == id }
+        if (matches.size() > 1 || (matches && (!(names[id] == null ? matches[0] instanceof StringCredentialsImpl : matches[0] instanceof FileCredentialsImpl) ||
+                                             matches[0].scope != CredentialsScope.GLOBAL))) {
+            throw new IllegalStateException('目标凭据重复、类型或 GLOBAL scope 冲突')
+        }
+        matches ? matches[0] : null
+    }
+    def sha = { credential ->
+        if (credential == null) { return null }
+        if (credential instanceof StringCredentialsImpl) { return digest(credential.secret.plainText.getBytes('UTF-8')) }
+        def stream = credential.content
+        try { digest(stream.bytes) } finally { stream.close() }
+    }
+    synchronized (provider) {
+        if (isIOS && names.keySet().count { current(it) != null } == 1) {
+            throw new IllegalStateException('iOS P12/password 必须同为缺失或完整；禁止重建单项')
+        }
+        if (snapshot == null) {
+            return [namespace: namespace, brand: brand, items: names.collect { id, filename ->
+                def old = current(id)
+                [id: id, status: old == null ? 'missing' : 'present', sha256: sha(old)]
+            }]
+        }
+        def expected = snapshot.items.collectEntries { [(it.id): it.sha256] }
+        if (snapshot.namespace != namespace || snapshot.brand != brand || expected.keySet() != names.keySet()) {
+            throw new IllegalStateException('Controller 旧值快照与所选品牌不一致')
+        }
+        // 在 NonCPS 内直接读 Agent 文件；秘密字节不进入 Pipeline 变量、日志或 CPS 持久状态。
+        def path = '/home/jenkins/signing'
+        [path, path + '/' + platform, path + '/' + platform + '/' + team,
+         path + '/' + platform + '/' + team + '/materials', path + '/' + platform + '/' + team + '/materials/' + brand,
+         path + '/' + platform + '/' + team + '/materials/' + brand + '/.jenkins-maintenance'].each { directory ->
+            def parent = new FilePath(computer.channel, directory)
+            if (parent.readLink() != null || !parent.isDirectory() || (parent.mode() & 0777) != 0700) {
+                throw new IllegalStateException('维护材料每级目录必须为 0700 且无符号链接')
+            }
+        }
+        def file = new FilePath(computer.channel, path + '/' + platform + '/' + team + '/materials/' + brand + '/.jenkins-maintenance/payload.json')
+        if (file.readLink() != null || file.isDirectory() || (file.mode() & 0777) != 0600 || file.length() > 16 * 1024 * 1024) {
+            throw new IllegalStateException('维护 payload 必须为 0600 常规小文件')
+        }
+        def payload = new JsonSlurperClassic().parseText(file.readToString())
+        if (payload.keySet() != (['namespace', 'brand', 'items', 'expected'] as Set) ||
+            payload.namespace != namespace || payload.brand != brand || payload.expected != expected ||
+            !(payload.items instanceof List) || payload.items.size() != names.size() ||
+            payload.items.collect { it.id }.toSet() != names.keySet()) {
+            throw new IllegalStateException('维护 payload 超出所选平台固定范围')
+        }
+        def changes = []
+        payload.items.each { item ->
+            if (item.keySet() != (['id', 'type', 'description', 'filename', 'value', 'sha256'] as Set) ||
+                item.type != (names[item.id] == null ? 'Secret text' : 'Secret file') || item.filename != names[item.id] ||
+                !(item.description instanceof String) || item.description.trim().isEmpty() ||
+                !(item.sha256 instanceof String) || !(item.sha256 ==~ /[a-f0-9]{64}/) ||
+                !(item.value instanceof String)) {
+                throw new IllegalStateException('维护材料类型、文件名或 SHA 无效')
+            }
+            byte[] bytes = item.value.decodeBase64()
+            if (digest(bytes) != item.sha256) { throw new IllegalStateException('维护材料字节与 SHA 不一致') }
+            def old = current(item.id)
+            def oldSha = sha(old)
+            if (oldSha != expected[item.id]) { throw new IllegalStateException('维护凭据 CAS 冲突；保留已验证材料') }
+            if ((isIOS || item.id == namespace + '-release-p12') && old != null && oldSha != item.sha256) {
+                throw new IllegalStateException('已有 P12 不一致；禁止替换 Team 私钥')
+            }
+            if (oldSha != item.sha256) {
+                changes << [id: item.id, old: old, sha: item.sha256,
+                            next: names[item.id] == null ? new StringCredentialsImpl(CredentialsScope.GLOBAL, item.id,
+                                item.description, Secret.fromString(new String(bytes, 'UTF-8'))) :
+                                new FileCredentialsImpl(CredentialsScope.GLOBAL, item.id,
+                                item.description, item.filename, SecretBytes.fromBytes(bytes))]
+            }
+        }
+        def attempted = []
+        def bulk = new BulkChange(provider)
+        try {
+            changes.each { change ->
+                attempted << change
+                def ok = change.old == null ? store.addCredentials(domain, change.next) :
+                    store.updateCredentials(domain, change.old, change.next)
+                if (!ok) { throw new IllegalStateException('credential-write-failed') }
+            }
+            if (payload.items.any { item -> sha(current(item.id)) != item.sha256 }) {
+                throw new IllegalStateException('credential-readback-failed')
+            }
+            bulk.commit()
+        } catch (Exception ignored) {
+            bulk.abort()
+            def rollback = new BulkChange(provider)
+            try {
+                attempted.reverseEach { change ->
+                    def now = current(change.id)
+                    if (sha(now) == sha(change.old)) { return }
+                    if (now != null && sha(now) != change.sha) { throw new IllegalStateException('rollback-conflict') }
+                    def ok = change.old == null ? (now == null || store.removeCredentials(domain, now)) :
+                        (now == null ? store.addCredentials(domain, change.old) : store.updateCredentials(domain, now, change.old))
+                    if (!ok) { throw new IllegalStateException('rollback-failed') }
+                }
+                rollback.commit()
+            } catch (Exception rollbackError) {
+                throw new IllegalStateException('签名凭据组更新及回滚未完成；保留材料，须管理员恢复')
+            } finally { rollback.abort() }
+            throw new IllegalStateException('签名凭据组更新失败，已恢复旧值；保留材料')
+        } finally { bulk.abort() }
+        return [brand: brand, updated: changes.collect { it.id }, verified: names.size()]
+    }
+}
+
+@NonCPS
+Map inventoryCredentialStatus(def run, String nodeName, String workspace, String brand, String platform) {
+    assertMaintenanceAccess(run, false)
+    def computer = Jenkins.get().getComputer(nodeName)
+    if (nodeName != 'signing-maintenance' || computer?.channel == null ||
+        !(platform in ['android', 'ios', 'harmony']) || !(brand ==~ /[a-z][a-z0-9_]*/)) {
+        throw new IllegalStateException('查询节点、平台或品牌无效')
+    }
+    def config = new JsonSlurperClassic().parseText(new FilePath(computer.channel, workspace).child('ci/brands.json').readToString())
+    def names
+    if (platform == 'android') {
+        def credentials = config[brand]?.android?.signing?.credentials
+        def keystore = credentials?.keystore
+        def signingJson = credentials?.signingJson
+        if (!(keystore instanceof String) || !(keystore ==~ /android-key-[a-z][a-z0-9-]*-keystore/) ||
+            !(signingJson instanceof String) || signingJson != keystore.replaceFirst(/-keystore$/, '-signing-json')) {
+            return [:]
+        }
+        names = [(keystore): true, (signingJson): true]
+    } else {
+        def team = platform == 'ios' ? (config[brand]?.ios?.signing?.test?.team ?: config[brand]?.ios?.signing?.release?.team) : config[brand]?.harmony?.teamKey
+        def teams = platform == 'ios' ? config._iosTeams : config._harmonyTeams
+        def namespace = teams[team]?.credentialNamespace
+        if (namespace == null) { return [:] }
+        if (!(namespace instanceof String) || !(namespace ==~ /[a-z][a-z0-9-]*/) ||
+            teams.any { key, value -> key != team && value.credentialNamespace == namespace }) {
+            return [:]
+        }
+        names = platform == 'ios' ? [
+            (namespace + '-asc-api-key'): true, (namespace + '-asc-key-id'): false,
+            (namespace + '-asc-issuer-id'): false, (namespace + '-distribution-p12'): true,
+            (namespace + '-distribution-p12-password'): false
+        ] : [
+            (namespace + '-sa-key'): true, (namespace + '-sa-key-id'): false,
+            (namespace + '-sa-sub-account'): false, (namespace + '-release-p12'): true,
+            (namespace + '-release-p12-password'): false,
+            (namespace + '-' + brand + '-designated-release-profile'): true,
+            (namespace + '-' + brand + '-devices-json'): true
+        ]
+    }
+    def context = signingCredentialStore(Jenkins.get(), names.keySet())
+    def provider = context.provider
+    def store = context.store
+    synchronized (provider) {
+        def credentials = store.getCredentials(Domain.global())
+        // 查询只判断存在、类型与 scope，秘密内容不进入 CPS 或查询报告。
+        return names.collectEntries { id, isFile ->
+            def matches = credentials.findAll { it.id == id }
+            def valid = matches.size() == 1 && matches[0].scope == CredentialsScope.GLOBAL &&
+                (isFile ? matches[0] instanceof FileCredentialsImpl : matches[0] instanceof StringCredentialsImpl)
+            [(id): matches.empty ? 'missing' : valid ? 'configured' : 'wrong-type']
+        }
+    }
+}
+
+def backupReady = false
+
+pipeline {
+    agent { label 'signing-maintenance' }
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 45, unit: 'MINUTES')
+        buildDiscarder(logRotator(daysToKeepStr: '30', numToKeepStr: '30'))
+    }
+    environment {
+        NOTIFY = 'false'
+        CI_AUTOMATION_COMMIT = '__CI_AUTOMATION_COMMIT__'
+        CI_TOOL_ROOT = "${WORKSPACE}/automation"
+        APP_SOURCE_ROOT = "${WORKSPACE}/source"
+        PYTHONPATH = "${WORKSPACE}/automation"
+    }
+    stages {
+        stage('Validate Maintenance Request') {
+            steps {
+                script {
+                    if (!(params.PLATFORM in ['all', 'ios', 'harmony']) ||
+                        !(params.OPERATION in ['inventory', 'onboard', 'devices']) ||
+                        !(params.MODE in ['plan', 'apply'])) {
+                        error '维护参数无效'
+                    }
+                    if ((params.OPERATION == 'inventory' && params.MODE != 'plan') ||
+                        (params.OPERATION != 'inventory' && params.PLATFORM == 'all')) {
+                        error '集中查询使用 plan；接入或设备同步必须选择一个平台'
+                    }
+                    if (!(params.DEVICE_SOURCE in ['shared', 'manual'])) { error '测试设备来源无效' }
+                    if (params.MODE == 'apply' && !params.CONFIRM_APPLY) {
+                        error 'apply 会创建签名材料或注册设备，必须确认目标品牌和 Team'
+                    }
+                    if (params.NOTIFY) { error '签名维护入口固定 NOTIFY=false' }
+                    def expectedNode = 'signing-maintenance'
+                    def expectedRoot = '/home/jenkins/signing'
+                    if (env.NODE_NAME != expectedNode || env.SIGNING_MAINTENANCE_ROOT != expectedRoot) {
+                        error '维护的 plan/apply 仅允许固定节点与持久签名目录'
+                    }
+                    if (!(env.CI_AUTOMATION_COMMIT ==~ /[0-9a-f]{40}/)) { error '维护工具须固定已审 CI Commit' }
+                    assertMaintenanceAccess(currentBuild.rawBuild, params.MODE == 'apply')
+                }
+            }
+        }
+        stage('Checkout Reviewed Scripts') {
+            steps {
+                deleteDir()
+                dir('automation') {
+                    checkout([
+                        $class: 'GitSCM', branches: [[name: env.CI_AUTOMATION_COMMIT]],
+                        doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [],
+                        userRemoteConfigs: [[credentialsId: 'fixture-scm',
+                            url: 'git@gitee.com:example/legacy-automation.git']]
+                    ])
+                }
+                dir('source') {
+                    checkout([
+                        $class: 'GitSCM', branches: [[name: 'refs/heads/master']],
+                        doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [],
+                        userRemoteConfigs: [[credentialsId: 'fixture-scm',
+                            url: 'git@gitee.com:example/legacy-application.git']]
+                    ])
+                }
+            }
+        }
+        stage('Maintain Signing') {
+            when { expression { params.OPERATION != 'inventory' } }
+            steps {
+                dir('source') {
+                    script {
+                        if (params.MODE == 'apply') {
+                            def backup = load(env.CI_TOOL_ROOT + '/jenkins/signing-backup.groovy')
+                            backup.publish()
+                            backupReady = true
+                        }
+                        def plan = sh(returnStdout: true, script: '''
+                            set +x
+                            set -eu
+                            python3 "$CI_TOOL_ROOT/signing/signing_maintenance.py" plan --platform "$PLATFORM" \
+                                --operation "$OPERATION" --brands "$TARGET_BRANDS" --state-root "$SIGNING_MAINTENANCE_ROOT"
+                        ''').trim()
+                        def targets = new groovy.json.JsonSlurperClassic().parseText(plan)
+                        targets.each { target ->
+                            echo "维护品牌 ${target.brand} / Team ${target.team} / ${params.MODE}"
+                            def namespace = target.namespace
+                            def bindings = params.PLATFORM == 'ios' ? [
+                                file(credentialsId: "${namespace}-asc-api-key", variable: 'ASC_API_KEY_PATH'),
+                                string(credentialsId: "${namespace}-asc-key-id", variable: 'ASC_API_KEY_ID'),
+                                string(credentialsId: "${namespace}-asc-issuer-id", variable: 'ASC_ISSUER_ID')
+                            ] : [
+                                file(credentialsId: "${namespace}-sa-key", variable: 'HARMONY_SA_KEY_PATH'),
+                                string(credentialsId: "${namespace}-sa-key-id", variable: 'HARMONY_SA_KEY_ID'),
+                                string(credentialsId: "${namespace}-sa-sub-account", variable: 'HARMONY_SA_SUB_ACCOUNT'),
+                                string(credentialsId: "${namespace}-release-p12-password", variable: 'HARMONY_P12_PASSWORD')
+                            ]
+                            def snapshot = null
+                            def syncDirectory = null
+                            if (params.PLATFORM == 'ios' && params.OPERATION == 'onboard' && target.reuseP12) {
+                                snapshot = maintenanceCredentials(currentBuild.rawBuild, env.NODE_NAME, env.APP_SOURCE_ROOT, target.brand, null, 'ios', params.MODE == 'apply')
+                            }
+                            if (params.PLATFORM == 'ios' && target.reuseP12 &&
+                                (snapshot == null || snapshot.items.every { it.status == 'present' })) {
+                                bindings += [
+                                    file(credentialsId: "${namespace}-distribution-p12", variable: 'IOS_DISTRIBUTION_P12'),
+                                    string(credentialsId: "${namespace}-distribution-p12-password", variable: 'IOS_DISTRIBUTION_P12_PASSWORD')
+                                ]
+                            }
+                            if (params.PLATFORM == 'harmony' && params.MODE == 'apply') {
+                                snapshot = maintenanceCredentials(currentBuild.rawBuild, env.NODE_NAME, env.APP_SOURCE_ROOT, target.brand)
+                                if (snapshot.items.find { it.id == namespace + '-release-p12' }.status == 'present') {
+                                    bindings += [file(credentialsId: namespace + '-release-p12', variable: 'HARMONY_EXISTING_P12_PATH')]
+                                }
+                            }
+                            if (snapshot != null && params.MODE == 'apply') {
+                                def signingRoot = '/home/jenkins/signing'
+                                if (env.SIGNING_MAINTENANCE_ROOT != signingRoot) { error '维护仅使用固定受限签名目录' }
+                                syncDirectory = signingRoot + '/' + params.PLATFORM + '/' + target.team + '/materials/' + target.brand + '/.jenkins-maintenance'
+                                withEnv(["MAINTENANCE_BRAND=${target.brand}"]) {
+                                    sh '''set +x; set -eu; umask 077
+                                        python3 "$CI_TOOL_ROOT/signing/signing_maintenance.py" prepare --platform "$PLATFORM" --operation "$OPERATION" \
+                                            --brand "$MAINTENANCE_BRAND" --state-root "$SIGNING_MAINTENANCE_ROOT"
+                                    '''
+                                }
+                                writeFile(file: syncDirectory + '/expected.json', text: groovy.json.JsonOutput.toJson(snapshot))
+                            }
+                            withCredentials(bindings) {
+                                withEnv(["MAINTENANCE_BRAND=${target.brand}",
+                                         "REGISTER_DEVICE=${target.registerDevice ? '--register-device' : ''}",
+                                         "SYNC_MATERIALS=${syncDirectory == null ? 'false' : 'true'}",
+                                         "SYNC_DIRECTORY=${syncDirectory ?: ''}"]) {
+                                    sh '''
+                                        set +x
+                                        set -eu
+                                        umask 077
+                                        if [ "$SYNC_MATERIALS" = true ]; then
+                                            set -- --expected-file "$SYNC_DIRECTORY/expected.json" --payload-file "$SYNC_DIRECTORY/payload.json"
+                                        else
+                                            set --
+                                        fi
+                                        python3 "$CI_TOOL_ROOT/signing/signing_maintenance.py" run --platform "$PLATFORM" \
+                                            --operation "$OPERATION" --brand "$MAINTENANCE_BRAND" --mode "$MODE" \
+                                            --state-root "${SIGNING_MAINTENANCE_ROOT:?管理员须预建节点外0700持久目录}" \
+                                            $REGISTER_DEVICE "$@"
+                                    '''
+                                }
+                            }
+                            if (syncDirectory != null) {
+                                def report = maintenanceCredentials(currentBuild.rawBuild, env.NODE_NAME, env.APP_SOURCE_ROOT, target.brand, snapshot, params.PLATFORM)
+                                echo "品牌 ${report.brand} 的 Jenkins 签名材料已核对；更新 ${report.updated.size()} 项"
+                                withEnv(["SYNC_DIRECTORY=${syncDirectory}"]) { sh 'rm -f "$SYNC_DIRECTORY/payload.json" "$SYNC_DIRECTORY/expected.json"' }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage('查询品牌与测试设备') {
+            when { expression { params.OPERATION == 'inventory' || params.MODE == 'apply' } }
+            steps {
+                dir('source') {
+                    script {
+                        def plan = sh(returnStdout: true, script: '''set +x; set -eu
+                            python3 "$CI_TOOL_ROOT/signing/signing_inventory.py" plan --platform all --brands all
+                        ''').trim()
+                        def targets = new JsonSlurperClassic().parseText(plan)
+                        targets.each { target ->
+                            def status = inventoryCredentialStatus(currentBuild.rawBuild, env.NODE_NAME, env.APP_SOURCE_ROOT, target.brand, target.platform)
+                            def roles = target.platform == 'ios' ? [
+                                apiKey: ['ASC_API_KEY_PATH', true], apiKeyId: ['ASC_API_KEY_ID', false],
+                                apiIssuerId: ['ASC_ISSUER_ID', false], p12: ['IOS_DISTRIBUTION_P12', true],
+                                p12Password: ['IOS_DISTRIBUTION_P12_PASSWORD', false]
+                            ] : target.platform == 'android' ? [
+                                keystore: ['ANDROID_KEYSTORE_FILE', true], signingConfig: ['ANDROID_SIGNING_CONFIG_FILE', true]
+                            ] : [
+                                apiKey: ['HARMONY_SA_KEY_PATH', true], apiKeyId: ['HARMONY_SA_KEY_ID', false],
+                                apiSubAccount: ['HARMONY_SA_SUB_ACCOUNT', false], p12: ['HARMONY_EXISTING_P12_PATH', true],
+                                p12Password: ['HARMONY_P12_PASSWORD', false], profile: ['HARMONY_PROFILE_FILE', true],
+                                devices: ['HARMONY_DEVICES_FILE', true]
+                            ]
+                            def bindings = []
+                            roles.each { role, specification ->
+                                def id = target.credentialIds[role]
+                                if (id != null && status[id] == 'configured') {
+                                    bindings << (specification[1] ? file(credentialsId: id, variable: specification[0]) :
+                                        string(credentialsId: id, variable: specification[0]))
+                                }
+                            }
+                            def reportRoot = 'build/signing-inventory'
+                            writeFile(file: reportRoot + '/status.json', text: groovy.json.JsonOutput.toJson(status))
+                            withCredentials(bindings) {
+                                withEnv(["INVENTORY_BRAND=${target.brand}", "INVENTORY_PLATFORM=${target.platform}"]) {
+                                    sh '''set +x; set -eu; umask 077
+                                        python3 "$CI_TOOL_ROOT/signing/signing_inventory.py" collect --brand "$INVENTORY_BRAND" \
+                                            --platform "$INVENTORY_PLATFORM" --state-root "$SIGNING_MAINTENANCE_ROOT" \
+                                            --credential-status-file build/signing-inventory/status.json \
+                                            --output "build/signing-inventory/rows/$INVENTORY_PLATFORM-$INVENTORY_BRAND.json"
+                                    '''
+                                }
+                            }
+                        }
+                        def inventorySummary = sh(returnStdout: true, script: '''set +x; set -eu; umask 077
+                            python3 "$CI_TOOL_ROOT/signing/signing_inventory.py" render --reports-dir build/signing-inventory/rows \
+                                --state-root "$SIGNING_MAINTENANCE_ROOT" --output-dir build/signing-inventory
+                        ''').trim()
+                        archiveArtifacts artifacts: 'build/signing-inventory/index.html,build/signing-inventory/report.css,build/signing-inventory/inventory.json', fingerprint: true
+                        currentBuild.description = '品牌与测试设备查询：打开归档的 index.html；完整 UDID 和私钥保留在受限签名目录'
+                        def summary = new JsonSlurperClassic().parseText(inventorySummary)
+                        echo "查询记录 ${summary.brands} 条；公共设备：iOS ${summary.devices.ios} 台，鸿蒙 ${summary.devices.harmony} 台"
+                        if (summary.queryFailures > 0) {
+                            unstable("${summary.queryFailures} 条品牌记录查询未完成，请查看查询页")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                try {
+                    if (backupReady) {
+                        def backup = load(env.CI_TOOL_ROOT + '/jenkins/signing-backup.groovy')
+                        backup.publish()
+                    }
+                } finally { deleteDir() }
+            }
+        }
+    }
+}

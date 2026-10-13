@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "id": "example-mobile",
+  "brands": ["example"],
+  "testOnly": true,
+  "credentials": {"scm":"example-scm","giteeApi":"example-gitee-api","giteeWebhook":"example-webhook-secret","giteeConnection":"example-gitee"},
+  "repositories": {
+    "application": {"identity":"example/native-mobile","ssh":"git@gitee.com:example/native-mobile.git","https":"https://gitee.com/example/native-mobile.git","defaultBranch":"main","trustRef":"refs/heads/main"},
+    "automation": {"identity":"example/ci","ssh":"git@gitee.com:example/ci.git","https":"https://gitee.com/example/ci.git","defaultBranch":"main","trustRef":"refs/heads/main"}
+  },
+  "providers": {
+    "pgyer": {"accountId":"example-pgyer","credentialId":"example-pgyer-key","legacyNamespace":false},
+    "dingtalk": {"accountId":"example-dingtalk","webhookCredentialId":"example-webhook","secretCredentialId":"example-secret","legacyNamespace":false}
+  },
+  "platforms": {
+    "android": {"adapter":"gradle","engines":["native"],"modules":{"native":"mobile"},"buildTypes":{"test":"Debug","release":"Release"},"applicationId":"org.example.mobile","artifact":"mobile/build/outputs/apk/{buildTypeLower}/mobile-{buildTypeLower}.apk"},
+    "ios": {"adapter":"xcode","engines":["native"],"project":"Native.xcodeproj","scheme":"Native","bundleId":"org.example.mobile.ios","xcconfig":{"test":"Configuration/Test.xcconfig","release":"Configuration/Release.xcconfig"},"configuration":"Release"}
+  },
+  "jobs": {
+    "android_test":{"name":"example/android-test","pipeline":"jenkins/Jenkinsfile.test"},
+    "android_release":{"name":"example/android-release","pipeline":"jenkins/Jenkinsfile.release"},
+    "ios_test":{"name":"example/ios-test","pipeline":"jenkins/Jenkinsfile.ios.test"},
+    "ios_release":{"name":"example/ios-release","pipeline":"jenkins/Jenkinsfile.ios.release"}
+  },
+  "contract": {"brandsFile":"ci/brands.json","buildSystem":"gradle"}
+}

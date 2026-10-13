@@ -1,0 +1,12 @@
+on_http_request:
+  # Gitee 无法完成交互式 Google OAuth；仅 MR 精确路径由 Gitee Webhook Secret 认证。
+  - expressions:
+      - "req.url.path != '/project/sxmqlive-pr-validation'"
+    actions:
+      - type: oauth
+        config:
+          provider: google
+  - expressions:
+      - "req.url.path != '/project/sxmqlive-pr-validation' && actions.ngrok.oauth.identity.email != '__ALLOWED_EMAIL__'"
+    actions:
+      - type: deny

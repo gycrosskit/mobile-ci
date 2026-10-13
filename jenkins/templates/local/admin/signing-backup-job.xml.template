@@ -1,0 +1,18 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job">
+  <actions />
+  <description>管理员自动备份：每十分钟检查三端签名与 Jenkins 配置，变化时公钥加密并推送现有私有仓库 backup/signing。失败只重试备份，不重复供应商写入，不上传或通知。恢复私钥由本地恢复密钥加密，服务器只持有公钥。可手动运行补备份。</description>
+  <displayName>签名加密备份（自动）</displayName>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <hudson.security.AuthorizationMatrixProperty plugin="matrix-auth">
+      <inheritanceStrategy class="org.jenkinsci.plugins.matrixauth.inheritance.NonInheritingStrategy" />
+    </hudson.security.AuthorizationMatrixProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>__SIGNING_BACKUP_PIPELINE__</script>
+    <sandbox>false</sandbox>
+  </definition>
+  <triggers><hudson.triggers.TimerTrigger><spec>H/10 * * * *</spec></hudson.triggers.TimerTrigger></triggers>
+  <disabled>false</disabled>
+</flow-definition>

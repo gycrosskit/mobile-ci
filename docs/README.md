@@ -1,0 +1,15 @@
+# CI 文档入口
+
+通用工具公开目标为 `gycrosskit/mobile-ci`；应用继续私有 Gitee，消费管理员审核的固定工具 Commit。
+
+1. [项目接入与复用](项目接入.md)：可信项目配置、薄构建适配和账户隔离。
+2. [通用部署](部署.md)与[运行验收](运行验收.md)：角色、配置、升级和独立验收。
+3. [GitHub 迁移与工具安全自测](GitHub迁移.md)：公共源码、Actions 与私有兼容边界。
+4. [开源准备](开源准备.md)与[上游许可](../THIRD_PARTY.md)：源码范围及镜像/SDK阻塞。
+5. [第二项目示例](../examples/second-project/README.md)与[可选应用 PR 入口](GitHub接入.md)：离线验证和按需接入。
+
+[鸿蒙环境重建](鸿蒙环境重建.md)和[Apple证书获取](Apple证书获取.md)提供官方材料获取入口。
+私有维护源的[发布流程](发布流程.md)、[仓库接线](仓库接线与切换.md)、[模板兼容](模板扩展.md)、
+[Linux runbook](../jenkins/remote/README.md)、[Mac runbook](../jenkins/local/README.md)仍支持现有实例；
+公开导出以中性入口替代公司操作及私有证据，不公开生产材料。
+安全报告见 [SECURITY](../SECURITY.md)。115 UNKNOWN仍阻断镜像；官方 CLT原ZIP已实装且隔离runtime通过，冷缓存HAP仍待独立验收。

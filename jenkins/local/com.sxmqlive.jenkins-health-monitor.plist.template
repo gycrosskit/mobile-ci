@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.sxmqlive.jenkins-health-monitor</string>
+  <key>ProgramArguments</key>
+  <array><string>__INSTALL_ROOT__/run-health-monitor.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GITEE_ACCESS_TOKEN</key>
+    <string></string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>300</integer>
+  <key>StandardOutPath</key><string>__LOG_DIR__/health-monitor.log</string>
+  <key>StandardErrorPath</key><string>__LOG_DIR__/health-monitor-error.log</string>
+</dict>
+</plist>

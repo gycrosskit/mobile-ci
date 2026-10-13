@@ -1,0 +1,9 @@
+# Fastlane 2.238.0 fastlane_core/cert_checker.rb 固定检查的公开 Apple 中间证书。
+# 格式：别名 DER_SHA256 文件名 Apple 官方来源。SHA-256 对证书 DER 内容计算，与 Fastlane 的比较方式一致。
+G2 9ed4b3b88c6a339cf1387895bda9ca6ea31a6b5ce9edf7511845923b0c8ac94c AppleWWDRCAG2.pem https://www.apple.com/certificateauthority/AppleWWDRCAG2.cer
+G3 dcf21878c77f4198e4b4614f03d696d89c66c66008d4244e1b99161aac91601f AppleWWDRCAG3.pem https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+G4 ea4757885538dd8cb59ff4556f676087d83c85e70902c122e42c0808b5bce14c AppleWWDRCAG4.pem https://www.apple.com/certificateauthority/AppleWWDRCAG4.cer
+G5 53fd008278e5a595fe1e908ae9c5e5675f26243264a5a6438c023e3ce2870760 AppleWWDRCAG5.pem https://www.apple.com/certificateauthority/AppleWWDRCAG5.cer
+G6 bdd4ed6e74691f0c2bfd01be0296197af1379e0418e2d300efa9c3bef642ca30 AppleWWDRCAG6.pem https://www.apple.com/certificateauthority/AppleWWDRCAG6.cer
+DEV-ID-G1 7afc9d01a62f03a2de9637936d4afe68090d2de18d03f29c88cfb0b1ba63587f DeveloperIDCA.pem https://www.apple.com/certificateauthority/DeveloperIDCA.cer
+DEV-ID-G2 f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a DeveloperIDG2CA.pem https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer

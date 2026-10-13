@@ -1,0 +1,12 @@
+[Unit]
+Description=Run sxmqlive Jenkins health monitor every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=sxmqlive-jenkins-health-monitor.service
+
+[Install]
+WantedBy=timers.target

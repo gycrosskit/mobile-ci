@@ -1,0 +1,4 @@
+# 只有显式要求下载安装 Xcode 时才使用；xcodes 会要求 Apple ID 和双重验证。
+tap "xcodesorg/made"
+brew "xcodesorg/made/xcodes"
+brew "aria2"

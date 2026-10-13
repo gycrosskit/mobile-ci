@@ -1,0 +1,686 @@
+def ciFailureStage = 'Pipeline Initialization'
+def ciProject = null
+def ciUnstableStage = null
+
+pipeline {
+    agent { label 'mac-build' }
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(
+            daysToKeepStr: '14',
+            numToKeepStr: '20',
+            artifactDaysToKeepStr: '14',
+            artifactNumToKeepStr: '5'
+        ))
+        timeout(time: 120, unit: 'MINUTES')
+    }
+
+    environment {
+        CI_OUTPUT_DIR = 'build/ci-ios'
+        APP_REPOSITORY_URL = 'git@gitee.com:example/legacy-application.git'
+        IOS_SIGNING_STATE_DIR = 'build/ci-ios/signing'
+        REGISTER_NEW_DEVICE = 'false'
+        FORCE_PROFILE_REFRESH = 'false'
+        SIGH_READONLY = 'true'
+        CI_FAILURE_STAGE = 'Pipeline Initialization'
+        CI_IOS_PIPELINE = 'test'
+    }
+
+    stages {
+        stage('Validate Delivery Mode') {
+            steps {
+                script {
+                    ciFailureStage = env.STAGE_NAME
+                    if (!(params.UPLOAD_AND_NOTIFY instanceof Boolean) || params.containsKey('DRY_RUN') || params.containsKey('NOTIFY')) {
+                        error '必须使用布尔 UPLOAD_AND_NOTIFY；旧参数或缺少新版表单时拒绝交付'
+                    }
+                    env.CI_DRY_RUN = params.UPLOAD_AND_NOTIFY ? 'false' : 'true'
+                    env.CI_NOTIFY = params.UPLOAD_AND_NOTIFY ? 'true' : 'false'
+                }
+            }
+        }
+        stage('Prepare Notification Runtime') {
+            steps {
+                script { ciFailureStage = env.STAGE_NAME }
+                dir('automation') {
+                    deleteDir()
+                    script {
+                        def automationCheckout = checkout scm
+                        env.CI_AUTOMATION_COMMIT = automationCheckout.GIT_COMMIT
+                        env.CI_TOOL_ROOT = pwd()
+                        env.APP_SOURCE_ROOT = "${pwd()}/../source"
+                        env.PYTHONPATH = env.CI_TOOL_ROOT
+                        def projectJson = sh(script: 'python3 "$CI_TOOL_ROOT/project_config.py" --job "$JOB_NAME" --role ios_test', returnStdout: true).trim()
+                        ciProject = new groovy.json.JsonSlurperClassic().parseText(projectJson)
+                        env.CI_PROJECT_ID = ciProject.id
+                        if (env.CI_NOTIFY == 'true' && (!ciProject.providers.dingtalk || ((params.TEST_CHANNEL ?: 'pgyer') == 'pgyer' && !ciProject.providers.pgyer))) {
+                            error '当前分发渠道缺少项目固定的供应商账号绑定'
+                        }
+                        env.CI_BRANDS_FILE = ciProject.contract.brandsFile
+                        env.CI_BUILD_ADAPTER = ciProject.platforms.ios.adapter
+                        env.APP_REPOSITORY_URL = ciProject.repositories.application.ssh
+                        env.CI_REPOSITORY_URL = ciProject.repositories.automation.ssh
+                        env.CI_DEFAULT_BRANCH = ciProject.repositories.application.defaultBranch
+                        env.CI_TRUSTED_FACTS_REF = ciProject.repositories.application.trustRef
+                        env.CI_SCM_CREDENTIAL_ID = ciProject.credentials.scm
+                        env.CI_PGYER_CREDENTIAL_ID = ciProject.providers.pgyer?.credentialId ?: ''
+                        env.CI_DINGTALK_WEBHOOK_CREDENTIAL_ID = ciProject.providers.dingtalk?.webhookCredentialId ?: ''
+                        env.CI_DINGTALK_SECRET_CREDENTIAL_ID = ciProject.providers.dingtalk?.secretCredentialId ?: ''
+                        env.CI_DINGTALK_TESTER_CREDENTIAL_ID = ciProject.providers.dingtalk?.testerCredentialId ?: ''
+                    }
+                    sh 'test "$(git rev-parse HEAD)" = "$CI_AUTOMATION_COMMIT"'
+                }
+                // 签名凭据授权仍来自应用master，所选分支只提供构建源码。
+                dir('automation/trusted-application-config') {
+                    deleteDir()
+                    script {
+                        def signingConfigCheckout = checkout([
+                            $class: 'GitSCM', branches: [[name: env.CI_TRUSTED_FACTS_REF]],
+                            extensions: [
+                                [$class: 'CloneOption', depth: 1, noTags: true, shallow: true, timeout: 10],
+                                [$class: 'SparseCheckoutPaths', sparseCheckoutPaths: [[path: env.CI_BRANDS_FILE]]]
+                            ],
+                            userRemoteConfigs: [[credentialsId: env.CI_SCM_CREDENTIAL_ID, url: env.APP_REPOSITORY_URL]]
+                        ])
+                        env.CI_SIGNING_CONFIG_COMMIT = signingConfigCheckout.GIT_COMMIT
+                        env.CI_SIGNING_CONFIG_ROOT = pwd()
+                        env.IOS_BRAND_CONFIG = "${env.CI_SIGNING_CONFIG_ROOT}/${env.CI_BRANDS_FILE}"
+                    }
+                    sh 'test "$(git rev-parse HEAD)" = "$CI_SIGNING_CONFIG_COMMIT" && test -s "$CI_BRANDS_FILE"'
+                }
+            }
+        }
+
+        stage('Validate Parameters') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        env.CI_BRANCH = (params.GIT_BRANCH ?: '')
+                            .trim()
+                            .replaceFirst('^origin/', '')
+                        env.CI_BRANCH_TYPE = (params.BRANCH_TYPE ?: '').trim()
+                        env.CI_BRAND = (params.BRAND ?: '').trim()
+                        env.CI_UI_ENGINE = (params.UI_ENGINE ?: ciProject.platforms.ios.engines[0]).trim()
+                        if (!(env.CI_UI_ENGINE in ciProject.platforms.ios.engines)) {
+                            error "不支持的 UI 引擎：${env.CI_UI_ENGINE}"
+                        }
+                        // CMP 不传新参数，兼容尚未接入 Kuikly 的历史分支和 Tag。
+                        env.CI_UI_ENGINE_ARGS = env.CI_UI_ENGINE == 'kuikly' ? '--ui-engine=kuikly' : env.CI_UI_ENGINE == 'native' ? '--ui-engine=native' : ''
+                        env.IOS_HOST_DIR = ciProject.platforms.ios.hostDirs?.get(env.CI_UI_ENGINE) ?: '.'
+                        currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.CI_BRAND} ${env.CI_UI_ENGINE}"
+                        env.CI_TEST_CHANNEL = (params.TEST_CHANNEL ?: '').trim()
+                        if (!env.CI_BRAND) {
+                            error '请选择构建品牌'
+                        }
+                        if (!(env.CI_TEST_CHANNEL in ['pgyer', 'testflight'])) {
+                            error "不支持的 iOS 测试分发渠道：${env.CI_TEST_CHANNEL ?: '未选择'}"
+                        }
+                        def expectedPrefix = [
+                            feature: "feature/${env.CI_BRAND}/",
+                            dev: "dev/${env.CI_BRAND}",
+                            release: "release/${env.CI_BRAND}-",
+                            default: ciProject.platforms.ios.adapter != 'sxmqlive' ? env.CI_DEFAULT_BRANCH : null
+                        ][env.CI_BRANCH_TYPE]
+                        if (!expectedPrefix) {
+                            error "不支持的分支类型：${env.CI_BRANCH_TYPE ?: '未选择'}"
+                        }
+                        def branchMatchesType = env.CI_BRANCH_TYPE in ['dev','default'] ?
+                            env.CI_BRANCH == expectedPrefix :
+                            env.CI_BRANCH.startsWith(expectedPrefix)
+                        if (!branchMatchesType) {
+                            error "分支 ${env.CI_BRANCH ?: '未选择'} 与类型 ${env.CI_BRANCH_TYPE} 不匹配"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Checkout Selected Branch') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def checkoutStarted = System.currentTimeMillis()
+                        echo "CI_TIMING_START label=checkout epoch_ms=${checkoutStarted}"
+                        env.CI_CHECKOUT_STARTED_MS = checkoutStarted.toString()
+                        // 仅同分支、同引擎且源码干净时复用缓存，切换宿主必须冷检出。
+                        def cachedBranch = fileExists('build/.ci-test-branch') ?
+                            readFile('build/.ci-test-branch').trim() : ''
+                        def cachedEngine = fileExists('build/.ci-test-engine') ?
+                            readFile('build/.ci-test-engine').trim() : 'cmp'
+                        def workspaceDirty = true
+                        if (cachedBranch == env.CI_BRANCH && cachedEngine == env.CI_UI_ENGINE && fileExists('.git')) {
+                            // 老品牌分支尚未同步 .gitignore 时，这些已核实的工具输出仍可安全忽略。
+                            def generated = [
+                                '?? ci/__pycache__/',
+                                '?? ci/scripts/__pycache__/',
+                                '?? ci/tests/__pycache__/',
+                                '?? fastlane/README.md',
+                                '?? fastlane/report.xml'
+                            ]
+                            def statusLines = sh(script: 'git status --porcelain', returnStdout: true).readLines()
+                            workspaceDirty = statusLines.any { line -> !(line in generated) }
+                        }
+                        if (workspaceDirty) {
+                            deleteDir()
+                        }
+                        env.CI_CACHE_MODE = workspaceDirty ? 'cold' : 'warm'
+                        echo "CI_CACHE mode=${env.CI_CACHE_MODE}"
+                    }
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: "refs/heads/${env.CI_BRANCH}"]],
+                        doGenerateSubmoduleConfigurations: false,
+                        extensions: [
+                            [$class: 'CloneOption', honorRefspec: true, noTags: true, timeout: 10]
+                        ],
+                        submoduleCfg: [],
+                        userRemoteConfigs: [[
+                            credentialsId: env.CI_SCM_CREDENTIAL_ID,
+                            refspec: "+refs/heads/${env.CI_BRANCH}:refs/remotes/origin/${env.CI_BRANCH}",
+                            url: env.APP_REPOSITORY_URL
+                        ]]
+                    ])
+                    dir('build') {
+                        writeFile file: '.ci-test-branch', text: env.CI_BRANCH
+                        writeFile file: '.ci-test-engine', text: env.CI_UI_ENGINE
+                    }
+                    // 签名、导出目录每次清空，避免复用旧包。
+                    dir('build/ci-ios') { deleteDir() }
+                    dir('build/reports/profile') { deleteDir() }
+                    script {
+                        def finished = System.currentTimeMillis()
+                        echo "CI_TIMING_END label=checkout epoch_ms=${finished} duration_ms=${finished - env.CI_CHECKOUT_STARTED_MS.toLong()}"
+                    }
+                }
+            }
+        }
+
+        stage('Resolve iOS Target') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def resolvedBrand = sh(
+                            script: 'python3 "$CI_TOOL_ROOT/delivery/ios_release.py" resolve-brand --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" ' +
+                                '--pipeline=test --branch="$CI_BRANCH" --brand="$CI_BRAND" ' +
+                                '--channel="$CI_TEST_CHANNEL"',
+                            returnStdout: true
+                        ).trim()
+                        if (resolvedBrand != env.CI_BRAND) {
+                            error "任务品牌 ${env.CI_BRAND} 与分支品牌 ${resolvedBrand} 不一致"
+                        }
+                        // 同一次解析固定品牌、签名与环境快照，避免逐字段重复启动进程。
+                        def iosConfigJson = sh(
+                            script: 'python3 "$CI_TOOL_ROOT/delivery/ios_release.py" config --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" $CI_UI_ENGINE_ARGS --brand="$CI_BRAND" --pipeline=test --format=json --channel="$CI_TEST_CHANNEL"',
+                            returnStdout: true
+                        ).trim()
+                        def iosConfig = new groovy.json.JsonSlurperClassic().parseText(iosConfigJson)
+                        env.IOS_SCHEME = iosConfig['scheme'].toString()
+                        env.IOS_BUNDLE_ID = iosConfig['bundle-id'].toString()
+                        env.IOS_ENVIRONMENT = iosConfig['environment'].toString()
+                        env.IOS_DISTRIBUTION = iosConfig['distribution'].toString()
+                        env.IOS_XCCONFIG = iosConfig['xcconfig'].toString()
+                        env.IOS_TEAM_ID = iosConfig['team-id'].toString()
+                        env.IOS_REPOSITORY_SIGNING_PATH = iosConfig['repository-signing-path'].toString()
+                        env.IOS_SIGNING_SOURCE = iosConfig.get('signing-source') ?: 'repository'
+                        env.IOS_P12_CREDENTIAL_ID = iosConfig['distribution-p12-credential'].toString()
+                        env.IOS_P12_PASSWORD_CREDENTIAL_ID = iosConfig['distribution-p12-password-credential'].toString()
+                        env.IOS_PORTAL_PROFILE_NAME = iosConfig['profile-name'].toString()
+                        env.ASC_API_KEY_CREDENTIAL_ID = iosConfig['asc-api-key-credential'].toString()
+                        env.ASC_KEY_ID_CREDENTIAL_ID = iosConfig['asc-key-id-credential'].toString()
+                        env.ASC_ISSUER_ID_CREDENTIAL_ID = iosConfig['asc-issuer-id-credential'].toString()
+                        env.IOS_BUILD_NUMBER = sh(
+                            script: "date -u '+%Y%m%d%H%M%S'",
+                            returnStdout: true
+                        ).trim()
+                        env.IOS_ARCHIVE_PATH = "${env.CI_OUTPUT_DIR}/archive/${env.IOS_SCHEME}-${env.IOS_ENVIRONMENT}-${env.IOS_DISTRIBUTION}.xcarchive"
+                        env.IOS_EXPORT_DIR = "${env.CI_OUTPUT_DIR}/export"
+                    }
+                    sh '''
+                        python3 "$CI_TOOL_ROOT/delivery/ios_release.py" validate --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" \
+                            $CI_UI_ENGINE_ARGS \
+                            --brand="$CI_BRAND" \
+                            --pipeline=test \
+                            --branch="$CI_BRANCH" \
+                            --channel="$CI_TEST_CHANNEL"
+                    '''
+                }
+            }
+        }
+
+        stage('Delivery Runtime Preflight') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def dryRunArg = (env.CI_DRY_RUN == 'true') ? ' --dry-run' : ''
+                        sh('python3 "$CI_TOOL_ROOT/delivery/delivery.py" preflight' + dryRunArg)
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    sh '''
+                        set -eu
+                        bash "$CI_TOOL_ROOT/delivery/ios_ci.sh" preflight "$IOS_SCHEME"
+                        bash "$CI_TOOL_ROOT/signing/ios_provisioning.sh" preflight
+                        if [ "$IOS_SIGNING_SOURCE" = repository ]; then
+                            test -s "$IOS_REPOSITORY_SIGNING_PATH/distribution.p12"
+                            test -s "$IOS_REPOSITORY_SIGNING_PATH/distribution-p12.password"
+                        fi
+                        (cd "$CI_TOOL_ROOT" && python3 -m unittest -b \
+                            tests.delivery.test_ci_execution_contracts \
+                            tests.delivery.test_ios_release)
+                        if [ "$CI_BUILD_ADAPTER" = sxmqlive ]; then
+                        python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                            --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-pod-install -- \
+                            bash -c 'cd "$IOS_HOST_DIR" && pod install --deployment'
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Prepare Temporary Keychain') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    sh 'bash "$CI_TOOL_ROOT/signing/ios_signing.sh" prepare'
+                }
+            }
+        }
+
+        stage('Install Test Signing Certificate') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    script {
+                        if (env.IOS_SIGNING_SOURCE == 'jenkins') {
+                            withCredentials([
+                                file(credentialsId: env.IOS_P12_CREDENTIAL_ID, variable: 'IOS_DISTRIBUTION_P12'),
+                                string(credentialsId: env.IOS_P12_PASSWORD_CREDENTIAL_ID, variable: 'IOS_DISTRIBUTION_P12_PASSWORD')
+                            ]) {
+                                sh 'bash "$CI_TOOL_ROOT/signing/ios_signing.sh" install-certificate'
+                            }
+                        } else {
+                            sh '''
+                                IOS_DISTRIBUTION_P12="$IOS_REPOSITORY_SIGNING_PATH/distribution.p12" \
+                                IOS_DISTRIBUTION_P12_PASSWORD_FILE="$IOS_REPOSITORY_SIGNING_PATH/distribution-p12.password" \
+                                    bash "$CI_TOOL_ROOT/signing/ios_signing.sh" install-certificate
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Download Test Profile') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    // 所选分支代码已在同一节点执行；此 Job 的 Build 权限本身就是发布凭据的安全边界。
+                    withCredentials([
+                        file(
+                            credentialsId: env.ASC_API_KEY_CREDENTIAL_ID,
+                            variable: 'ASC_API_KEY_PATH'
+                        ),
+                        string(
+                            credentialsId: env.ASC_KEY_ID_CREDENTIAL_ID,
+                            variable: 'ASC_API_KEY_ID'
+                        ),
+                        string(
+                            credentialsId: env.ASC_ISSUER_ID_CREDENTIAL_ID,
+                            variable: 'ASC_ISSUER_ID'
+                        )
+                    ]) {
+                        withEnv([
+                            "IOS_PROFILE_NAME=${env.IOS_PORTAL_PROFILE_NAME}"
+                        ]) {
+                            sh 'bash "$CI_TOOL_ROOT/signing/ios_provisioning.sh" sync'
+                        }
+                    }
+                    script {
+                        env.IOS_PROVISIONING_PROFILE = sh(
+                            script: "cat '${env.IOS_SIGNING_STATE_DIR}/profile-path.txt'",
+                            returnStdout: true
+                        ).trim()
+                    }
+                }
+            }
+        }
+
+        stage('Install Test Profile') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    withEnv([
+                        "IOS_PROVISIONING_PROFILE=${env.IOS_PROVISIONING_PROFILE}"
+                    ]) {
+                        sh 'bash "$CI_TOOL_ROOT/signing/ios_signing.sh" install-profile'
+                    }
+                    script {
+                        env.IOS_KEYCHAIN_PATH = sh(
+                            script: "sed -n 's/^IOS_KEYCHAIN_PATH=//p' '${env.IOS_SIGNING_STATE_DIR}/signing.env'",
+                            returnStdout: true
+                        ).trim()
+                        env.IOS_PROFILE_NAME = sh(
+                            script: "sed -n 's/^IOS_PROFILE_NAME=//p' '${env.IOS_SIGNING_STATE_DIR}/signing.env'",
+                            returnStdout: true
+                        ).trim()
+                    }
+                }
+            }
+        }
+
+        stage('Archive QA App') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    // 通知凭据由设备运行时配置，构建阶段不绑定机器人凭据。
+                    sh '''
+                        python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                            --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-archive -- \
+                            bash "$CI_TOOL_ROOT/delivery/ios_ci.sh" archive \
+                            "$IOS_ENVIRONMENT" \
+                            "$IOS_DISTRIBUTION" \
+                            "$IOS_SCHEME" \
+                            "$IOS_XCCONFIG" \
+                            "$IOS_TEAM_ID" \
+                            "$IOS_BUILD_NUMBER" \
+                            "$IOS_PROFILE_NAME" \
+                            "$IOS_KEYCHAIN_PATH"
+                    '''
+                }
+            }
+            post {
+                always {
+                    dir('source') {
+                        script {
+                            // Archive 内嵌 Gradle 的 Profile 用于排障，不覆盖原始构建结果。
+                            try {
+                                archiveArtifacts(
+                                    artifacts: 'build/reports/profile/**',
+                                    allowEmptyArchive: true
+                                )
+                            } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException interrupted) {
+                                throw interrupted
+                            } catch (Exception ignored) {
+                                echo 'iOS Archive Gradle profile could not be archived; original result is preserved.'
+                            }
+                        }
+                                        }
+                }
+            }
+        }
+
+        stage('Export QA IPA') {
+            steps {
+                dir('source') {
+                    script { ciFailureStage = env.STAGE_NAME }
+                    sh '''
+                        python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                            --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-export -- \
+                            bash "$CI_TOOL_ROOT/delivery/ios_ci.sh" export \
+                            "$IOS_DISTRIBUTION" \
+                            "$IOS_TEAM_ID" \
+                            "$IOS_BUNDLE_ID" \
+                            "$IOS_PROFILE_NAME" \
+                            "$IOS_ARCHIVE_PATH" \
+                            "$IOS_EXPORT_DIR"
+                        python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                            --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-archive-zip -- \
+                            bash "$CI_TOOL_ROOT/delivery/ios_ci.sh" package-artifacts "$IOS_ARCHIVE_PATH"
+                        python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" size \
+                            --output="$CI_OUTPUT_DIR/timings.jsonl" --label=xcarchive-zip \
+                            --path="$CI_OUTPUT_DIR/$(basename "$IOS_ARCHIVE_PATH").zip"
+                    '''
+                    script {
+                        env.IOS_IPA_PATH = sh(
+                            script: 'bash "$CI_TOOL_ROOT/delivery/ios_ci.sh" find-ipa "$IOS_EXPORT_DIR"',
+                            returnStdout: true
+                        ).trim()
+                    }
+                    sh '''
+                        python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" size \
+                            --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ipa --path="$IOS_IPA_PATH"
+                    '''
+                }
+            }
+        }
+
+        stage('Generate Release Context') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        env.CI_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                        env.CI_BUILDER = env.BUILD_USER_ID ?: env.BUILD_USER ?: 'jenkins'
+                        env.CI_UPDATE_DESCRIPTION = params.UPDATE_DESCRIPTION ?: ''
+                        env.CI_WORK_ITEM_TYPE = params.get('WORK_ITEM_TYPE') ?: ''
+                        env.CI_WORK_ITEM_ID = params.get('WORK_ITEM_ID') ?: ''
+                        env.CI_WORK_ITEM_URL = params.get('WORK_ITEM_URL') ?: ''
+                    }
+                    sh '''
+                        python3 "$CI_TOOL_ROOT/delivery/ios_release.py" prepare --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" \
+                            $CI_UI_ENGINE_ARGS \
+                            --brand="$CI_BRAND" \
+                            --pipeline=test \
+                            --branch="$CI_BRANCH" \
+                            --channel="$CI_TEST_CHANNEL" \
+                            --ipa="$IOS_IPA_PATH" \
+                            --manual-changelog="$CI_UPDATE_DESCRIPTION" \
+                            --commit="$CI_COMMIT" \
+                            --builder="$CI_BUILDER" \
+                            --work-item-type="$CI_WORK_ITEM_TYPE" \
+                            --work-item-id="$CI_WORK_ITEM_ID" \
+                            --work-item-url="$CI_WORK_ITEM_URL" \
+                            --output-dir="$CI_OUTPUT_DIR"
+                    '''
+                }
+            }
+        }
+
+        stage('Verify IPA Signature') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        if (env.IOS_SIGNING_SOURCE == 'jenkins') {
+                            withCredentials([
+                                file(credentialsId: env.IOS_P12_CREDENTIAL_ID, variable: 'IOS_DISTRIBUTION_P12'),
+                                string(credentialsId: env.IOS_P12_PASSWORD_CREDENTIAL_ID, variable: 'IOS_DISTRIBUTION_P12_PASSWORD')
+                            ]) {
+                                sh 'bash "$CI_TOOL_ROOT/signing/ios_signing.sh" verify-ipa'
+                            }
+                        } else {
+                            sh '''
+                                IOS_DISTRIBUTION_P12="$IOS_REPOSITORY_SIGNING_PATH/distribution.p12" \
+                                IOS_DISTRIBUTION_P12_PASSWORD_FILE="$IOS_REPOSITORY_SIGNING_PATH/distribution-p12.password" \
+                                    bash "$CI_TOOL_ROOT/signing/ios_signing.sh" verify-ipa
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Distribute Test IPA') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        if (env.CI_TEST_CHANNEL == 'pgyer') {
+                            if ((env.CI_DRY_RUN == 'true')) {
+                                sh '''
+                                    python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                                        --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-upload-dry-run -- \
+                                        python3 "$CI_TOOL_ROOT/delivery/ios_release.py" upload --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --dry-run
+                                '''
+                            } else {
+                                withCredentials([
+                                    string(credentialsId: env.CI_PGYER_CREDENTIAL_ID, variable: 'PGYER_API_KEY')
+                                ]) {
+                                    sh '''
+                                        python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                                            --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-upload -- \
+                                            python3 "$CI_TOOL_ROOT/delivery/ios_release.py" upload --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE"
+                                    '''
+                                }
+                            }
+                        } else if ((env.CI_DRY_RUN == 'true')) {
+                            sh '''
+                                python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                                    --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-upload-dry-run -- \
+                                    python3 "$CI_TOOL_ROOT/delivery/ios_release.py" record-app-store --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --dry-run
+                            '''
+                        } else {
+                            withCredentials([
+                                file(
+                                    credentialsId: env.ASC_API_KEY_CREDENTIAL_ID,
+                                    variable: 'ASC_API_KEY_PATH'
+                                ),
+                                string(
+                                    credentialsId: env.ASC_KEY_ID_CREDENTIAL_ID,
+                                    variable: 'ASC_API_KEY_ID'
+                                ),
+                                string(
+                                    credentialsId: env.ASC_ISSUER_ID_CREDENTIAL_ID,
+                                    variable: 'ASC_API_ISSUER_ID'
+                                )
+                            ]) {
+                                sh '''
+                                    python3 "$CI_TOOL_ROOT/delivery/ci_timing.py" run \
+                                        --output="$CI_OUTPUT_DIR/timings.jsonl" --label=ios-upload -- \
+                                        bash "$CI_TOOL_ROOT/delivery/ios_ci.sh" upload-app-store "$IOS_IPA_PATH"
+                                    python3 "$CI_TOOL_ROOT/delivery/ios_release.py" record-app-store --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE"
+                                '''
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Notify DingTalk') {
+            when { expression { env.CI_NOTIFY == 'true' } }
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        if (env.CI_NOTIFY != 'true') {
+                            echo 'UPLOAD_AND_NOTIFY=false: success notification skipped.'
+                        } else if ((env.CI_DRY_RUN == 'true')) {
+                            sh 'python3 "$CI_TOOL_ROOT/delivery/ios_release.py" notify --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE" --dry-run'
+                        } else {
+                            catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                                withCredentials([
+                                    string(credentialsId: env.CI_DINGTALK_WEBHOOK_CREDENTIAL_ID, variable: 'DINGTALK_WEBHOOK'),
+                                    string(credentialsId: env.CI_DINGTALK_SECRET_CREDENTIAL_ID, variable: 'DINGTALK_SECRET')] + (env.CI_DINGTALK_TESTER_CREDENTIAL_ID ? [string(credentialsId: env.CI_DINGTALK_TESTER_CREDENTIAL_ID, variable: 'DINGTALK_TESTER_MOBILE')] : [])) {
+                                    sh 'python3 "$CI_TOOL_ROOT/delivery/ios_release.py" notify --config="$CI_SIGNING_CONFIG_ROOT/$CI_BRANDS_FILE"'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            post {
+                unsuccessful {
+                    script { ciUnstableStage = env.STAGE_NAME }
+                }
+            }
+        }
+
+        stage('Archive iOS QA Artifacts') {
+            steps {
+                dir('source') {
+                    script {
+                        ciFailureStage = env.STAGE_NAME
+                        def started = System.currentTimeMillis()
+                        echo "CI_TIMING_START label=ios-delivery-archive epoch_ms=${started}"
+                        archiveArtifacts(
+                            artifacts: 'build/ci-ios/export/*.ipa,build/ci-ios/*.zip,build/ci-ios/ExportOptions-*.plist,build/ci-ios/export/DistributionSummary.plist,build/ci-ios/export/ExportOptions.plist,build/ci-ios/*.json,build/ci-ios/*.jsonl,build/ci-ios/*.md',
+                            fingerprint: true
+                        )
+                        echo "CI_TIMING_END label=ios-delivery-archive duration_ms=${System.currentTimeMillis() - started}"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            dir('source') {
+                script {
+                    def resultBeforeCleanup = currentBuild.currentResult
+                    def stageBeforeCleanup = ciFailureStage
+                    if (fileExists("${env.CI_TOOL_ROOT}/signing/ios_signing.sh")) {
+                        // 两类临时状态必须独立清理；Keychain 清理失败不能阻止 Profile 目录继续清理。
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh 'bash "$CI_TOOL_ROOT/signing/ios_signing.sh" cleanup'
+                        }
+                    }
+                    if (fileExists("${env.CI_TOOL_ROOT}/signing/ios_provisioning.sh")) {
+                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                            sh 'bash "$CI_TOOL_ROOT/signing/ios_provisioning.sh" cleanup'
+                        }
+                    }
+                    ciFailureStage = currentBuild.currentResult == resultBeforeCleanup ?
+                        stageBeforeCleanup : 'Cleanup Temporary Signing'
+                }
+            }
+        }
+        success {
+            dir('source') {
+                echo 'iOS test package distributed successfully.'
+            }
+        }
+        unstable {
+            dir('source') {
+                echo 'iOS test IPA distribution succeeded, but a non-critical notification step failed.'
+                script {
+                    if (env.CI_NOTIFY != 'true') {
+                        echo 'UPLOAD_AND_NOTIFY=false: unstable notification skipped.'
+                        return
+                    }
+                    try {
+                        if (!env.CI_TOOL_ROOT || !fileExists("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy")) {
+                            error 'Trusted CI notification runtime is unavailable'
+                        }
+                        load("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy").send('iOS', 'UNSTABLE', ciUnstableStage ?: ciFailureStage)
+                    } catch (Exception ignored) {
+                        echo 'Jenkins unstable notification could not be sent; original result is preserved.'
+                    }
+                }
+            }
+        }
+        failure {
+            dir('source') {
+                echo 'iOS test package distribution failed.'
+                script {
+                    if (env.CI_NOTIFY != 'true') {
+                        echo 'UPLOAD_AND_NOTIFY=false: failure notification skipped.'
+                        return
+                    }
+                    try {
+                        if (!env.CI_TOOL_ROOT || !fileExists("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy")) {
+                            error 'Trusted CI notification runtime is unavailable'
+                        }
+                        load("${env.CI_TOOL_ROOT}/jenkins/notify_failure.groovy").send('iOS', 'FAILURE', ciFailureStage)
+                    } catch (Exception ignored) {
+                        echo 'Jenkins failure notification could not be sent; original result is preserved.'
+                    }
+                }
+            }
+        }
+    }
+}

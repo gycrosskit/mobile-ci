@@ -1,0 +1,74 @@
+{
+  "repositories": {
+    "application": {
+      "identity": "example/legacy-application",
+      "ssh": "git@gitee.com:example/legacy-application.git",
+      "https": "https://gitee.com/example/legacy-application.git",
+      "defaultBranch": "master",
+      "trustRef": "refs/heads/master"
+    },
+    "automation": {
+      "identity": "example/legacy-automation",
+      "ssh": "git@gitee.com:example/legacy-automation.git",
+      "https": "https://gitee.com/example/legacy-automation.git",
+      "defaultBranch": "master",
+      "trustRef": "refs/heads/master"
+    }
+  },
+  "credentials": {
+    "scm": "fixture-scm",
+    "giteeApi": "fixture-giteeApi",
+    "giteeWebhook": "fixture-giteeWebhook",
+    "giteeConnection": "fixture-giteeConnection"
+  },
+  "jobs": {
+    "android_test": {
+      "name": "mobile-apps/sxmqlive-android-test",
+      "pipeline": "jenkins/Jenkinsfile.test"
+    },
+    "android_release": {
+      "name": "mobile-apps/sxmqlive-android-formal-release",
+      "pipeline": "jenkins/Jenkinsfile.release"
+    },
+    "ios_test": {
+      "name": "mobile-apps/sxmqlive-ios-test",
+      "pipeline": "jenkins/Jenkinsfile.ios.test"
+    },
+    "ios_release": {
+      "name": "mobile-apps/sxmqlive-ios-formal-release",
+      "pipeline": "jenkins/Jenkinsfile.ios.release"
+    },
+    "harmony_test": {
+      "name": "mobile-apps/sxmqlive-ohos-test",
+      "pipeline": "jenkins/Jenkinsfile.ohos.test"
+    },
+    "harmony_release": {
+      "name": "mobile-apps/sxmqlive-ohos-formal-release",
+      "pipeline": "jenkins/Jenkinsfile.ohos.test"
+    },
+    "app_pr": {
+      "name": "sxmqlive-pr-validation",
+      "pipeline": "jenkins/Jenkinsfile.pr-validation"
+    },
+    "ci_pr": {
+      "name": "sxmqlive-ci-pr-validation",
+      "pipeline": "jenkins/Jenkinsfile.ci-pr-validation"
+    },
+    "wiki": {
+      "name": "运维/sxmqlive-wiki-navigation",
+      "pipeline": "jenkins/Jenkinsfile.wiki-navigation"
+    },
+    "signing_maintenance": {
+      "name": "mobile-apps/sxmqlive-signing-maintenance",
+      "pipeline": "jenkins/Jenkinsfile.signing.maintenance"
+    },
+    "signing_backup": {
+      "name": "运维/sxmqlive-signing-backup",
+      "pipeline": "jenkins/Jenkinsfile.signing.backup"
+    },
+    "alert": {
+      "name": "运维/Jenkins 失败告警验收",
+      "pipeline": "jenkins/Jenkinsfile.alert-test"
+    }
+  }
+}

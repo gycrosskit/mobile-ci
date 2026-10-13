@@ -1,0 +1,53 @@
+pipeline {
+    agent { label '{{CI_SIGNING_NODE}}' }
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 10, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+    triggers { cron('H/10 * * * *') }
+    environment {
+        NOTIFY = 'false'
+        CI_AUTOMATION_COMMIT = '__CI_AUTOMATION_COMMIT__'
+        CI_TOOL_ROOT = "${WORKSPACE}/automation"
+        APP_SOURCE_ROOT = "${WORKSPACE}/source"
+        PYTHONPATH = "${WORKSPACE}/automation"
+    }
+    stages {
+        stage('Validate Reviewed Backup') {
+            steps {
+                script {
+                    if (!(env.CI_AUTOMATION_COMMIT ==~ /[0-9a-f]{40}/)) { error '备份工具须固定已审 CI Commit' }
+                }
+            }
+        }
+        stage('Checkout Reviewed Backup') {
+            steps {
+                deleteDir()
+                dir('automation') {
+                    checkout([$class: 'GitSCM', branches: [[name: env.CI_AUTOMATION_COMMIT]],
+                        doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [],
+                        userRemoteConfigs: [[credentialsId: '{{CI_CI_CHECKOUT_CREDENTIAL}}',
+                            url: '{{CI_CI_CHECKOUT_URL}}']]])
+                }
+                dir('source') {
+                    checkout([$class: 'GitSCM', branches: [[name: 'refs/heads/{{CI_ROLE_BRANCH}}']],
+                        doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [],
+                        userRemoteConfigs: [[credentialsId: '{{CI_CREDENTIAL_SCM}}',
+                            url: '{{CI_APP_SSH}}']]])
+                }
+            }
+        }
+        stage('加密并同步签名备份') {
+            steps {
+                script {
+                    def backup = load(env.CI_TOOL_ROOT + '/jenkins/signing-backup.groovy')
+                    backup.publish()
+                    currentBuild.description = '仅备份并同步 Git，不注册设备、不更新供应商证书'
+                }
+            }
+        }
+    }
+    post { always { deleteDir() } }
+}

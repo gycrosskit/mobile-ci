@@ -1,0 +1,178 @@
+name: sxmqlive-jenkins
+
+services:
+  agent-secrets-init:
+    image: sxmqlive/jenkins-controller:2.568.3-gitee-1301
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -d -o 1000 -g 1000 -m 700 /android-secret
+        && install -d -o 1000 -g 1000 -m 700 /pr-secret
+        && install -d -o 1000 -g 1000 -m 700 /android-work
+        && install -d -o 1000 -g 1000 -m 700 /android-gradle
+        && install -d -o 1000 -g 1000 -m 700 /pr-work
+        && install -d -o 1000 -g 1000 -m 700 /pr-gradle
+        && install -d -o 1000 -g 1000 -m 700 /linux-build-memory
+        && test ! -L /linux-build-memory/build.lock
+        && if [ ! -e /linux-build-memory/build.lock ]; then
+        (umask 077; set -C; : > /linux-build-memory/build.lock)
+        && chown 1000:1000 /linux-build-memory/build.lock
+        && chmod 600 /linux-build-memory/build.lock; fi
+        && test -f /linux-build-memory/build.lock
+        && test "$(stat -c '%u:%a' /linux-build-memory/build.lock)" = "1000:600"
+    volumes:
+      - jenkins_agent_secret:/android-secret
+      - jenkins_pr_agent_secret:/pr-secret
+      - jenkins_agent_work:/android-work
+      - gradle_cache:/android-gradle
+      - jenkins_pr_agent_work:/pr-work
+      - pr_gradle_cache:/pr-gradle
+      - type: volume
+        source: linux_build_memory
+        target: /linux-build-memory
+        volume:
+          nocopy: true
+    restart: "no"
+
+  controller:
+    build:
+      context: ../..
+      dockerfile: jenkins/controller/Dockerfile
+    image: sxmqlive/jenkins-controller:2.568.3-gitee-1301
+    container_name: sxmqlive-jenkins-controller
+    restart: unless-stopped
+    init: true
+    depends_on:
+      agent-secrets-init:
+        condition: service_completed_successfully
+    ports:
+      - "${JENKINS_HTTP_HOST:-127.0.0.1}:${JENKINS_HTTP_PORT:-18080}:8080"
+    environment:
+      JAVA_OPTS: >-
+        -Xms256m
+        -Xmx1024m
+        -Djava.awt.headless=true
+      ANDROID_AGENT_NAME: "${JENKINS_AGENT_NAME:-linux-build}"
+      ANDROID_AGENT_LABELS: "${JENKINS_AGENT_LABELS:-android-builder ohos-linux linux-build}"
+      ANDROID_AGENT_REMOTE_FS: /home/jenkins/agent
+      ANDROID_AGENT_SECRET_FILE: /run/jenkins-agent-bootstrap/agent.secret
+      PR_AGENT_NAME: "${JENKINS_PR_AGENT_NAME:-pr-linux}"
+      PR_AGENT_LABELS: pr-builder
+      PR_AGENT_REMOTE_FS: /home/jenkins/agent
+      PR_AGENT_SECRET_FILE: /run/jenkins-pr-agent-bootstrap/agent.secret
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - jenkins_agent_secret:/run/jenkins-agent-bootstrap
+      - jenkins_pr_agent_secret:/run/jenkins-pr-agent-bootstrap
+      - ./init.groovy.d/01-configure-android-agent.groovy:/var/jenkins_home/init.groovy.d/01-configure-android-agent.groovy:ro
+      - ../controller/init.groovy.d/02-configure-gitee.groovy:/var/jenkins_home/init.groovy.d/02-configure-gitee.groovy:ro
+      - ../controller/init.groovy.d/03-configure-script-approvals.groovy:/var/jenkins_home/init.groovy.d/03-configure-script-approvals.groovy:ro
+      - ../controller/init.groovy.d/04-ci-auto-promotion.groovy:/var/jenkins_home/init.groovy.d/04-ci-auto-promotion.groovy:ro
+      - ../controller/CiAutoPromotion.groovy:/var/jenkins_home/ci-auto-promotion/CiAutoPromotion.groovy:ro
+      - ../controller/init.groovy.d/05-signing-portal.groovy:/var/jenkins_home/init.groovy.d/05-signing-portal.groovy:ro
+      - ../controller/signing-portal:/var/jenkins_home/signing-portal:ro
+      - ./init.groovy.d/03-configure-pr-agent.groovy:/var/jenkins_home/init.groovy.d/03-configure-pr-agent.groovy:ro
+      - ./init.groovy.d/04-remove-legacy-ai-review-agent.groovy:/var/jenkins_home/init.groovy.d/04-remove-legacy-ai-review-agent.groovy:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/login >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    mem_limit: 2g
+
+  android-agent:
+    build:
+      context: ./android-agent
+    container_name: sxmqlive-jenkins-android-agent
+    restart: unless-stopped
+    init: true
+    depends_on:
+      agent-secrets-init:
+        condition: service_completed_successfully
+      controller:
+        condition: service_healthy
+    environment:
+      JENKINS_URL: http://controller:8080
+      JENKINS_AGENT_NAME: "${JENKINS_AGENT_NAME:-linux-build}"
+      JENKINS_AGENT_SECRET_FILE: /run/jenkins-agent-bootstrap/agent.secret
+      JENKINS_AGENT_WORKDIR: /home/jenkins/agent
+      DELIVERY_STATE_ROOT: /home/jenkins/agent/delivery-state
+      CI_LINUX_MEMORY_LOCK: /home/jenkins/linux-build-memory/build.lock
+      DWS_CONFIG_DIR: /home/jenkins/.dws
+      DWS_LANG: zh
+    volumes:
+      - type: volume
+        source: linux_build_memory
+        target: /home/jenkins/linux-build-memory
+        volume:
+          nocopy: true
+      - jenkins_agent_secret:/run/jenkins-agent-bootstrap:ro
+      - jenkins_agent_work:/home/jenkins/agent
+      - gradle_cache:/home/jenkins/.gradle
+      - dws_state:/home/jenkins/.dws-state
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /run/jenkins-agent-bootstrap/agent.secret && pgrep -f 'agent.jar' >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    # 单 Executor 串行构建；R8/Native 峰值允许使用受控 swap。
+    mem_limit: 6g
+    memswap_limit: 14g
+    mem_swappiness: 60
+
+  pr-agent:
+    build:
+      context: ./android-agent
+    container_name: sxmqlive-jenkins-pr-agent
+    restart: unless-stopped
+    init: true
+    depends_on:
+      agent-secrets-init:
+        condition: service_completed_successfully
+      controller:
+        condition: service_healthy
+    environment:
+      JENKINS_URL: http://controller:8080
+      JENKINS_AGENT_NAME: "${JENKINS_PR_AGENT_NAME:-pr-linux}"
+      JENKINS_AGENT_SECRET_FILE: /run/jenkins-pr-agent-bootstrap/agent.secret
+      JENKINS_AGENT_WORKDIR: /home/jenkins/agent
+      CI_LINUX_MEMORY_LOCK: /home/jenkins/linux-build-memory/build.lock
+    volumes:
+      - type: volume
+        source: linux_build_memory
+        target: /home/jenkins/linux-build-memory
+        volume:
+          nocopy: true
+      - jenkins_pr_agent_secret:/run/jenkins-pr-agent-bootstrap:ro
+      - jenkins_pr_agent_work:/home/jenkins/agent
+      - pr_gradle_cache:/home/jenkins/.gradle
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /run/jenkins-pr-agent-bootstrap/agent.secret && pgrep -f 'agent.jar' >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    mem_limit: 5g
+
+volumes:
+  jenkins_home:
+    name: sxmqlive_jenkins_home
+  jenkins_agent_secret:
+    name: sxmqlive_jenkins_agent_secret
+  jenkins_pr_agent_secret:
+    name: sxmqlive_jenkins_pr_agent_secret
+  jenkins_agent_work:
+    name: sxmqlive_jenkins_agent_work
+  gradle_cache:
+    name: sxmqlive_gradle_cache
+  jenkins_pr_agent_work:
+    name: sxmqlive_jenkins_pr_agent_work
+  pr_gradle_cache:
+    name: sxmqlive_pr_gradle_cache
+  dws_state:
+    name: sxmqlive_dws_state
+  linux_build_memory:
+    name: sxmqlive_linux_build_memory
