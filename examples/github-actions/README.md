@@ -21,7 +21,7 @@
 ## 固定版本与权限
 
 Action 使用官方仓库完整 commit：checkout v4.2.2、setup-python v5.6.0、setup-java v4.7.1。
-Python 固定 3.11.9，Temurin JDK 固定 21.0.11+10；Groovy 2.4.21 从 Maven Central 下载，并核对与现有
+Python 固定 3.11.9，Temurin JDK 固定 21.0.11+10（setup-java 选择器写作 `21.0.11+10.0.LTS`）；Groovy 2.4.21 从 Maven Central 下载，并核对与现有
 Jenkins 测试运行时一致的 SHA-256。更新版本时同步更新 YAML、测试常量和校验值，重新做最小验收。
 `ubuntu-24.04` 和 `macos-14` 是托管镜像系列，不是不可变镜像摘要；这些锁不能代替真实远端验收。
 

@@ -1,6 +1,6 @@
 {
   ".github/workflows/check.yml": "16d8a7c6ff7d04ad19acfbcb5170335d1cb96fde998f4a9db124b893d5c3f6df",
-  ".github/workflows/reusable-check.yml": "c3b930640300e9e6dc6c90cdabd23782c462b541d323c8f9d9d4148432802d50",
+  ".github/workflows/reusable-check.yml": "d43caf752647f132d406d9765644076563eecaa6288dd1c44c4b84db44bb6a22",
   ".gitignore": "07c9b0e8e0b6f2012d8441b6f8d2b225d09ed347d3dc18331d85b4b6cf48b948",
   "CONTRIBUTING.md": "f099076c4402f10ab722c0c65c625eb143d0b6715918842bc19a3936033ef27e",
   "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
@@ -38,11 +38,11 @@
   "docs/镜像许可核查.md": "e68c2fcefafd34e00e8288af313ea8afe939aff942735fca0aabedcfec75cca9",
   "docs/项目接入.md": "bf167427649900e0af593a2bbbe7cf92a42ad94c426a75a482de5e797155dd1b",
   "docs/鸿蒙环境重建.md": "479ec50ed8e89341651368f02306ab353782336a5e92dba10cda1289cb46bf4b",
-  "examples/github-actions/README.md": "99bd9604b4f79aac259afe12dd4f9d211e04737253dde15e2639b0a5362e08d2",
+  "examples/github-actions/README.md": "11468321f6a4c773b72f0b75174c6d935e30765bbd4b938e10212b9d1dda3423",
   "examples/github-actions/application-pr.yml": "c7315dcd962b3e5e6e0f1317b1cb83e542ac80c6b9e2a7133cb0f2ea8a212f13",
   "examples/github-actions/check.yml": "16d8a7c6ff7d04ad19acfbcb5170335d1cb96fde998f4a9db124b893d5c3f6df",
   "examples/github-actions/reusable-application-pr.yml": "cf06341062dfafb4e134c2558a0c5fa8ebb8d23cd0c2e35a04ab6c9d9cb7b020",
-  "examples/github-actions/reusable-check.yml": "c3b930640300e9e6dc6c90cdabd23782c462b541d323c8f9d9d4148432802d50",
+  "examples/github-actions/reusable-check.yml": "d43caf752647f132d406d9765644076563eecaa6288dd1c44c4b84db44bb6a22",
   "examples/github-actions/validate.py": "7fd725a96c1b568d1c44f7f0d4e9cc80426ef32bcf64c75e4d8386ec1b09d091",
   "examples/second-project/README.md": "2ff9ffd77d7ee0fecf77974d288f99e6e395cf828dbe3260589a7695c9b51742",
   "examples/second-project/application/.gitignore": "838655f2e91bf2cc39b78e25f41b3706543530eeaca3c710e323d9c7fa5619ca",
@@ -238,7 +238,7 @@
   "tests/jenkins/test_failure_notification_bindings.py": "e73abc65b40a15b154c1390c2bcab2a33a7086d6300b026c6776b3b52394e0af",
   "tests/jenkins/test_generate_jenkins_job_templates.py": "ae93cc2174b8ce69ba7e68fbbc63812da3423e93cd3b71a52b0e3a3d40fd9e83",
   "tests/jenkins/test_github_pr_check.py": "075ba04b84aacb5c62085ed9c5adcb1e67326896bb927c877550862dfa7fe1cd",
-  "tests/jenkins/test_github_workflow_examples.py": "1fc6dbf56f450800c920028b9ad7a4fd87f70dc7bb0eccd8c8c4e66b45602038",
+  "tests/jenkins/test_github_workflow_examples.py": "40e07b5098418829e8f26c2de492f2f2e298f684f3f115c8e9f0dfa203bff9a2",
   "tests/jenkins/test_harmony_job_parameters.groovy": "d9fc18188b833ef94c80116b9a64d9f3650c65a4b6858e4c98d3abc78abaad39",
   "tests/jenkins/test_harmony_job_parameters.py": "dd21e4d0dda506fea013b76548b6fc42c5ce2cfc6ee96f06ce5cb3f59e160e1b",
   "tests/jenkins/test_harmony_pipeline.py": "3a3388f0bdf36ea7d2c8c3f8c310ccb9b8bbdd5a7148cef5c2aace0ff6897203",
@@ -292,5 +292,5 @@
   "tests/signing/test_signing_devices.py": "ecd9ead42bdd049f8ebf6bfd2f77412ebe974f75b6553b15bc7e304c8a2ebca0",
   "tests/signing/test_signing_inventory.py": "d7de43e4981660593904ea39a51c144f8b0710293dcb367c13dc8d9f6ac74025",
   "tests/signing/test_signing_maintenance.py": "728688a81363eb93e068c954260a1f62d3b112219bb194864743e1882244ece1",
-  "SOURCE-ORIGIN.json": "f9f3a63362ef170c81823420968975c98ede58390af8a198244a579ce1f016e7"
+  "SOURCE-ORIGIN.json": "93e2615d118c01510361a9545d3eb439155ad5700c1197d0317c9f302fc7699b"
 }

@@ -90,7 +90,7 @@ class GitHubWorkflowExamplesTest(unittest.TestCase):
         actions = {step["uses"].split("@")[0]: step for step in steps if "uses" in step}
         self.assertEqual(False, actions["actions/checkout"]["with"]["persist-credentials"])
         self.assertEqual("3.11.9", actions["actions/setup-python"]["with"]["python-version"])
-        self.assertEqual("21.0.11+10", actions["actions/setup-java"]["with"]["java-version"])
+        self.assertEqual("21.0.11+10.0.LTS", actions["actions/setup-java"]["with"]["java-version"])
 
     def test_native_security_job_is_narrow_fixed_and_cannot_silently_skip(self):
         from jenkins.run_public_checks import MACOS_NATIVE_CHECK
