@@ -1,6 +1,6 @@
 # 移动端 CI
 
-复用 Android、iOS 和 HarmonyOS 的门禁、签名运维、交付与恢复工具，生产应用编排使用 Jenkins + Gitee，通用工具的公开目标是 `gycrosskit/mobile-ci`。
+复用 Android、iOS 和 HarmonyOS 的门禁、签名运维、交付与恢复工具，生产应用编排使用 Jenkins + Gitee，通用工具已公开于 [gycrosskit/mobile-ci](https://github.com/gycrosskit/mobile-ci)。
 应用保留 Gradle/Xcode/Hvigor 工程、品牌事实和本地 Debug 工具；日常业务改动只更新应用仓库，消费固定 CI 版本。
 
 | 能力 | 当前支持与边界 |
@@ -12,11 +12,11 @@
 | 多项目 | 受信项目 JSON、薄构建适配、账户/回执/备份隔离；[第二项目示例](examples/second-project/README.md) |
 | GitHub Actions | [工具安全自测](docs/GitHub迁移.md)；[独立应用 PR 参考](docs/GitHub接入.md) 可按需接入，私有应用无需新增 YAML |
 
-当前按[纯源码发行范围](docs/开源准备.md#本轮验收范围纯源码发行)收尾验收，只准备中性 CI 工具源码、
-文档和示例；应用继续留在私有 Gitee，不新增 YAML，现有生产 Jenkins 保持原位。
-115 条未确认组件属于镜像发行阻塞，镜像/SDK/第三方二进制不随源码候选包发布。
-源码技术验收与实际公开发布分开记录；[SECURITY](SECURITY.md) 已登记维护者授权的安全报告邮箱，2026-10-13 已完成一次自发自收，一次外部邮件已送达，经人工纠正垃圾分类后在收件箱；
-工具迁入 `gycrosskit/mobile-ci` 的范围与步骤见 [GitHub 迁移](docs/GitHub迁移.md)。
+公开内容限定于[纯源码发行范围](docs/开源准备.md#本轮验收范围纯源码发行)：中性 CI 工具源码、文档和示例。
+应用继续留在私有 Gitee，不新增 YAML；生产 Jenkins 按管理员审核的固定完整 CI SHA 逐 Job 接入。
+115 条未确认组件仍阻断镜像发行，镜像/SDK/第三方二进制不随源码发布。
+远端 Actions 与真实 fork PR 检查已通过，范围见 [GitHub 迁移](docs/GitHub迁移.md)；这不代替生产接入、签名或发布验收。
+[SECURITY](SECURITY.md) 提供已启用的 GitHub 私有漏洞报告入口及维护者邮箱。
 
 | 目录 | 唯一职责 |
 | --- | --- |

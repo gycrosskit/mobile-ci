@@ -5,7 +5,10 @@ Jenkins 解密材料或供应商完整响应。
 
 ## 私有报告渠道
 
-请将安全漏洞私下发送至 [guoyanggit@gmail.com](mailto:guoyanggit@gmail.com)，不要在公开 Issue、MR 或日志披露
+优先使用已启用的 [GitHub 私有漏洞报告](https://github.com/gycrosskit/mobile-ci/security/advisories/new)。
+入口启用不代表已验证真实报告的完整处理流程。
+
+也可将安全漏洞私下发送至 [guoyanggit@gmail.com](mailto:guoyanggit@gmail.com)，不要在公开 Issue、MR 或日志披露
 完整漏洞利用细节。建议邮件主题为 `CI 安全报告：简要描述`；初次联系只提供脱敏材料，不附带真实凭据或用户数据。
 
 维护者已于 2026-10-13 授权此邮箱并完成一次自发自收及一封外部测试投递。
@@ -13,14 +16,8 @@ Jenkins 解密材料或供应商完整响应。
 维护者仍需检查垃圾箱，不承诺响应时限。私有投递回执不随公开源码发布。
 邮箱没有已公布的加密公钥；传递敏感证据前请先约定受限接收方式。
 
-## 公开源码前的核验
-
-维护者须记录实际外部投递的核验日期与结果；测试只使用无敏感内容。
-本地源码包、门禁和一次自发自收不等于所有外部投递或 GitHub 私有漏洞报告已经验证。
-
-未来可按 [GitHub 官方说明](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
-启用工具仓库的 `Private vulnerability reporting` 作为补充渠道，核验真实入口后再将报告页面写入本文件。
-邮箱作为报告渠道不要求迁移应用或创建公开仓库；应用与公司实例继续留在私有 Gitee。
+报告渠道配置见 [GitHub 官方说明](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)。
+应用与公司实例继续留在私有 Gitee；公开工具的报告入口不要求迁移应用。
 
 ## 报告内容与处理边界
 
