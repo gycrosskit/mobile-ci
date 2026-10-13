@@ -84,3 +84,5 @@ Controller 实际 CPS、权限拒绝、审批持久化重启回读按 [运行验
 新项目由[中性模板](docs/模板扩展.md)生成固定 Job 与审批文本，不依赖公司旧字符串替换。
 公开发行前运行[历史秘密扫描与第三方许可核查](docs/第三方许可核查.md)；镜像/SDK 分发需独立核查，
 源码许可证不会自动覆盖 Gitee 插件、厂商 SDK 或公开 CA 数据。
+
+<!-- Fork PR acceptance: source checks only; no production credentials, package delivery or notifications. -->
