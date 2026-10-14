@@ -189,6 +189,8 @@ def _validate_deployment(value):
             candidates = [n for n in agents if JOB_LABELS[role] in n['labels'] and not (role in {'app_pr', 'ci_pr'} and 'ios-pr-builder' in n['labels'])]
             require(bool(candidates) and all(JOB_CAPABILITIES[role] in n['capabilities'] for n in candidates), 'Pipeline label pool存在能力不匹配节点')
             require(not role.startswith('android_') or all(n['target']['os'] == 'linux' for n in candidates), 'Android标签pool不能包含尚未迁移预算的Mac节点')
+            require(role not in {'app_pr', 'ci_pr'} or all(n['target']['os'] == 'linux' for n in candidates),
+                    'PR主Pipeline标签pool不能包含尚未迁移Linux契约的Mac节点')
             node_roles[aid].add(role)
     for a in agents:
         require(not ('pr-builder' in a['labels'] and set(a['labels']) & {'android-builder', 'mac-build', 'linux-build', 'signing-maintenance'}), 'PR标签不能与生产构建/维护标签共用')

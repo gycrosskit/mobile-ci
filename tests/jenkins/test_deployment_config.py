@@ -153,6 +153,24 @@ class DeploymentConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(DeploymentConfigError, 'PR主Pipeline'):
             validate_deployment(self.m)
 
+    def test_linux_pr_binding_rejects_native_mac_in_same_label_pool(self):
+        node = self.m['agents'][-1]
+        node['capabilities'] = ['ci', 'android']
+        node['labels'] = ['pr-builder']
+        node['sdks'].pop('xcode')
+        node['sdks']['android'] = node['service']['home'] + '/android-sdk'
+        node['expectedVersions'] = {'python': '3.13.7'}
+        for role in ('app_pr', 'ci_pr'):
+            with self.subTest(role=role):
+                self.m['profiles']['example-mobile'][role] = 'pr-one'
+                with self.assertRaisesRegex(DeploymentConfigError, 'PR主Pipeline标签pool'):
+                    validate_deployment(self.m)
+                self.m['profiles']['example-mobile'].pop(role)
+        node['labels'] = ['native-ci-tools']
+        self.m['profiles']['example-mobile']['ci_pr'] = 'pr-one'
+        self.assertEqual(['pr-one'], job_agent_bindings(validate_deployment(self.m),
+            {'id': 'example-mobile', 'jobs': {'ci_pr': {}}})['ci_pr']['eligibleAgentIds'])
+
     def test_private_bounded_single_link_loader_and_duplicate_keys(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
             root = Path(temp).resolve(); root.chmod(0o700)
