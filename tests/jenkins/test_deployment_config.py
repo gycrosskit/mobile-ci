@@ -115,6 +115,15 @@ class DeploymentConfigTests(unittest.TestCase):
         self.rejected(lambda m: m['profiles']['example-mobile'].update(android_test='mac-ios-one'))
         self.rejected(lambda m: m['agents'][0]['labels'].clear())
 
+    def test_secret_volumes_cannot_alias_controller_other_agents_or_reserved_services(self):
+        for secret in ('controller-home', 'memory-lock', 'android-one-work', 'android-one-cache',
+                       'android-one-runtime', 'android-one-profiles', 'pr-one-work', 'pr-one-profiles'):
+            with self.subTest(secret=secret):
+                self.rejected(lambda m: m['agents'][1].update(secretRef=secret))
+        for key in ('controller', 'agent'):
+            with self.subTest(service=key):
+                self.rejected(lambda m: (m['controller'] if key == 'controller' else m['agents'][0]).update(id='state-init'))
+
     def test_multiple_equivalent_build_agents_are_supported_as_label_pool(self):
         second = copy.deepcopy(self.m['agents'][0])
         second.update(id='android-two', name='android-two', secretRef='android-two-connection')

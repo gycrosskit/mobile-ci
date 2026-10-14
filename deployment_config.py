@@ -75,6 +75,7 @@ def platform(value):
 
 def identity(node, controller=False):
     require(matches(r'[a-z][a-z0-9-]{0,63}', node['id']) and matches(r'[A-Za-z0-9_.-]{1,64}', node['name']) and node['name'] not in {'.', '..'}, '无效节点身份')
+    require(node['id'] != 'state-init', '节点ID不能覆盖固定state-init服务')
     platform(node['host'])
     platform(node['target'])
     fields(node['service'], {'user', 'uid', 'gid', 'home'}, 'service')
@@ -169,6 +170,12 @@ def _validate_deployment(value):
             require(all(a['service']['home'] != h and not under(a['service']['home'], h) and not under(h, a['service']['home']) for h in native_homes), 'Mac Agent HOME不能共享或重叠')
             native_homes.append(a['service']['home'])
             require(all(under(p, a['service']['home']) for k, p in a['sdks'].items() if k not in {'java', 'xcode'}), 'Mac remoting/Android必须隔离在该Agent HOME')
+    # Compose卷名共用一个命名空间，Secret不能别名到Controller或构建数据卷。
+    volume_names = ['controller-home', 'memory-lock', *secrets]
+    for a in agents:
+        if a['runtime'] == 'compose':
+            volume_names += [a['id'] + '-profiles', *(a['id'] + '-' + key for key in a['paths'] if key != 'secret')]
+    require(len(volume_names) == len(set(volume_names)), 'Secret/状态卷名称冲突，拒绝跨节点挂载')
     profiles = value['profiles']
     require(isinstance(profiles, dict) and bool(profiles), '必须显式绑定受信profile与任务')
     require(isinstance(value['primaryProjectId'], str) and value['primaryProjectId'] in profiles, 'primaryProjectId必须显式引用已绑定受信项目')
