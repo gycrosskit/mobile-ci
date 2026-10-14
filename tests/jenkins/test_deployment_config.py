@@ -169,7 +169,7 @@ class DeploymentConfigTests(unittest.TestCase):
         node['labels'] = ['native-ci-tools']
         self.m['profiles']['example-mobile']['ci_pr'] = 'pr-one'
         self.assertEqual(['pr-one'], job_agent_bindings(validate_deployment(self.m),
-            {'id': 'example-mobile', 'jobs': {'ci_pr': {}}})['ci_pr']['eligibleAgentIds'])
+            {'id': 'example-mobile', 'jobs': {role: {} for role in self.m['profiles']['example-mobile']}})['ci_pr']['eligibleAgentIds'])
 
     def test_private_bounded_single_link_loader_and_duplicate_keys(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
