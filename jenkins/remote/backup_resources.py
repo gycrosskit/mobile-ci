@@ -42,7 +42,6 @@ def resources(config, project, *, controller_dr=True):
     signing_root = project['signingBackup']['root']
     result = {
         'home': volume('controller', '/var/jenkins_home'),
-        'dws': volume('android', '/home/jenkins/.dws-state'),
         'signing': volume('maintenance', signing_root),
         'work': volume('android', work),
         'controller': resource(service('controller').get('container_name')),
@@ -54,7 +53,7 @@ def resources(config, project, *, controller_dr=True):
     }
     if not isinstance(result['image'], str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_./:@-]+', result['image']):
         raise ValueError('灾备必须使用清单固定的 Controller 镜像')
-    if len({result[key] for key in ('home', 'dws', 'signing', 'work')}) != 4:
+    if len({result[key] for key in ('home', 'signing', 'work')}) != 3:
         raise ValueError('灾备材料/状态卷必须相互隔离')
     if len({result[key] for key in ('controller', 'android', 'maintenance')}) != 3:
         raise ValueError('灾备停止/恢复容器角色必须相互隔离')
@@ -70,7 +69,7 @@ def main():
         raise ValueError('无法读取有界完整 Compose 清单')
     value = resources(json.loads(rendered), project)
     # 只输出已经校验的数据，由 shell read 接收；不输出、拼接或执行清单中的 shell。
-    print(' '.join(str(value[key]) for key in ('home', 'dws', 'signing', 'work', 'controller', 'android',
+    print(' '.join(str(value[key]) for key in ('home', 'signing', 'work', 'controller', 'android',
                                               'maintenance', 'uid', 'receiptRelative', 'image', 'projectId')))
 
 

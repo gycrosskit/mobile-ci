@@ -51,7 +51,7 @@ if args[0] == 'compose':
     config = {'name': 'sxmqlive', 'volumes': {}, 'services': {}}
     for role, container in zip(roles, ['sxmqlive-jenkins-controller', 'sxmqlive-jenkins-android-agent', 'sxmqlive-jenkins-pr-agent', 'sxmqlive-jenkins-ohos-maintenance-agent']):
         config['services'][role] = {'container_name': container, 'image': 'sxmqlive-jenkins-controller:latest', 'environment': {'JENKINS_AGENT_WORKDIR': '/home/jenkins/agent', 'DELIVERY_STATE_ROOT': '/home/jenkins/agent/delivery-state'}, 'volumes': []}
-    for role, target, name in [('controller','/var/jenkins_home','sxmqlive_jenkins_home'), ('android-agent','/home/jenkins/.dws-state','sxmqlive_dws_state'), ('android-agent','/home/jenkins/agent','sxmqlive_jenkins_agent_work'), ('ohos-maintenance','/home/jenkins/signing','sxmqlive_ohos_signing')]:
+    for role, target, name in [('controller','/var/jenkins_home','sxmqlive_jenkins_home'), ('android-agent','/home/jenkins/agent','sxmqlive_jenkins_agent_work'), ('ohos-maintenance','/home/jenkins/signing','sxmqlive_ohos_signing')]:
         config['volumes'][name] = {'name': name}
         config['services'][role]['volumes'].append({'type':'volume','source':name,'target':target})
     if os.environ.get('FAKE_COMPOSE'):
@@ -148,7 +148,7 @@ elif args[0] == 'run' and args[args.index('--entrypoint') + 1] == 'tar':
                     'FAKE_HOME': str(self.home),
                     'FAKE_AGENT_WORK': str(self.agent_work),
                     'COPYFILE_DISABLE': '1',
-                    'JENKINS_SKIP_DWS_STATE': 'true', 'JENKINS_BACKUP_DIR': str(self.root / 'backups')}
+                    'JENKINS_BACKUP_DIR': str(self.root / 'backups')}
 
     def execute(self, name, *arguments, **environment):
         if name == 'backup.sh' and environment.get('MISSING_AGENT_WORK') != 'true':
@@ -192,7 +192,7 @@ elif args[0] == 'run' and args[args.index('--entrypoint') + 1] == 'tar':
         self.state = nested / 'delivery-state'
         self.receipt = self.state / self.receipt.name
         self.env.update(JENKINS_CI_PROJECT='example-mobile', FAKE_COMPOSE=str(fixture), FAKE_WORK_VOLUME=self.work_volume)
-        self.volumes.write_text(json.dumps(['example-mobile-home', 'example-mobile-dws', 'example-mobile-signing']))
+        self.volumes.write_text(json.dumps(['example-mobile-home', 'example-mobile-signing']))
         result = self.execute('backup.sh')
         self.assertEqual(0, result.returncode, result.stderr)
         bundle = next((self.root / 'backups').glob('example-mobile-*.tar.gz'))
@@ -208,7 +208,7 @@ elif args[0] == 'run' and args[args.index('--entrypoint') + 1] == 'tar':
         self.volumes.write_text('[]')
         self.env['JENKINS_CI_PROJECT'] = 'sxmqlive'
         fixture.write_text(json.dumps(compose_fixture(load_project())))
-        (ci / 'projects/sxmqlive.json').write_text((REMOTE.parents[1] / 'projects/sxmqlive.json').read_text())
+        (ci / 'projects/sxmqlive.json').write_text((REMOTE.parents[1] / 'tests/fixtures/legacy-project.json').read_text())
         result = self.execute('restore.sh', bundle)
         self.assertNotEqual(0, result.returncode)
         self.assertIn('scope/project/owner differs', result.stderr)
@@ -217,10 +217,12 @@ elif args[0] == 'run' and args[args.index('--entrypoint') + 1] == 'tar':
     def commands(self):
         return [json.loads(row) for row in self.log.read_text().splitlines()]
 
-    def migration(self, signing=True, signing_checksum=True):
+    def migration(self, signing=True, signing_checksum=True, legacy_dws=False):
         files = {'jenkins-home.tar.gz': b'home'}
         if signing:
             files['ohos-signing.tar.gz'] = b'signing'
+        if legacy_dws:
+            files['dws-state.tar.gz'] = b'legacy auth must not be extracted'
         manifest = ''.join(hashlib.sha256(value).hexdigest() + '  ' + name + '\n'
                            for name, value in files.items()
                            if name != 'ohos-signing.tar.gz' or signing_checksum)
@@ -419,7 +421,7 @@ elif args[0] == 'run' and args[args.index('--entrypoint') + 1] == 'tar':
         self.assertEqual(0, result.returncode, result.stderr)
         bundle = next((self.root / 'backups').glob('*.tar.gz'))
         with tarfile.open(bundle) as outer:
-            self.assertEqual({'jenkins-home.tar.gz', 'dws-state.tar.gz', 'ohos-signing.tar.gz',
+            self.assertEqual({'jenkins-home.tar.gz', 'ohos-signing.tar.gz',
                               'linux-delivery-state.tar.gz', 'delivery-state-coverage.json', 'controller-backup-policy.json', 'manifest.sha256'}, set(outer.getnames()))
             with tarfile.open(fileobj=io.BytesIO(outer.extractfile('jenkins-home.tar.gz').read())) as home:
                 names = {name[2:] if name.startswith('./') else name for name in home.getnames()}
@@ -451,7 +453,7 @@ elif args[0] == 'run' and args[args.index('--entrypoint') + 1] == 'tar':
         self.assertFalse((output / '.backup.lock').exists())
         self.assertFalse(list(output.glob('*.partial')))
 
-    def test_new_bundle_restores_home_dws_and_signing_into_isolated_directories(self):
+    def test_new_bundle_restores_home_and_signing_without_touching_legacy_dws(self):
         self.volumes.write_text(json.dumps([HOME_VOLUME, 'sxmqlive_dws_state', SIGNING_VOLUME]))
         for name in ['credentials.xml', 'secrets/master.key', 'jobs/mobile-apps/config.xml']:
             file = self.home / name
@@ -469,8 +471,9 @@ elif args[0] == 'run' and args[args.index('--entrypoint') + 1] == 'tar':
                 recovered = restored / HOME_VOLUME / file.relative_to(self.home)
                 self.assertEqual(file.read_bytes(), recovered.read_bytes())
                 self.assertEqual(file.stat().st_mode & 0o777, recovered.stat().st_mode & 0o777)
-        for volume in ['sxmqlive_dws_state', SIGNING_VOLUME]:
-            self.assertEqual(b'{}', (restored / volume / 'state.json').read_bytes())
+        self.assertEqual(b'{}', (restored / SIGNING_VOLUME / 'state.json').read_bytes())
+        self.assertFalse((restored / 'sxmqlive_dws_state').exists())
+        self.assertFalse(any('dws' in argument for command in self.commands() for argument in command))
         self.assertEqual(self.receipt.read_bytes(), (restored / AGENT_WORK_VOLUME / 'delivery-state' / self.receipt.name).read_bytes())
 
     def test_corrupt_new_backup_does_not_publish_or_prune_and_resumes_controller(self):
@@ -541,6 +544,32 @@ if args[0] == '-xzf' and args[-1] == 'verify':
         result = self.execute('restore.sh', self.migration(signing=False))
         self.assertEqual(3, result.returncode, result.stderr)
         self.assertFalse(any(SIGNING_VOLUME in argument for command in self.commands() for argument in command))
+
+    def test_legacy_dws_archive_is_verified_and_skipped_without_touching_existing_state(self):
+        source = self.migration(legacy_dws=True)
+        original = source.read_bytes()
+        self.volumes.write_text(json.dumps(['sxmqlive_dws_state']))
+        result = self.execute('restore.sh', source)
+        self.assertEqual(3, result.returncode, result.stderr)
+        self.assertIn('Legacy DWS authentication archive verified and skipped', result.stderr)
+        self.assertEqual(original, source.read_bytes())
+        self.assertIn('sxmqlive_dws_state', json.loads(self.volumes.read_text()))
+        self.assertFalse(any('dws' in argument for command in self.commands() for argument in command))
+
+    def test_corrupt_legacy_dws_archive_fails_before_creating_material_volumes(self):
+        source = self.migration(legacy_dws=True)
+        with tarfile.open(source) as archive:
+            files = {member.name: archive.extractfile(member).read() for member in archive}
+        files['dws-state.tar.gz'] = b'changed after checksum'
+        with tarfile.open(source, 'w:gz') as archive:
+            for name, content in files.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                archive.addfile(member, io.BytesIO(content))
+        result = self.execute('restore.sh', source)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('dws-state.tar.gz: FAILED', result.stdout)
+        self.assertFalse(any(command[:2] in (['volume', 'create'], ['volume', 'rm']) for command in self.commands()))
 
     def test_restore_creates_fresh_signing_volume_with_private_permissions(self):
         result = self.execute('restore.sh', self.migration())

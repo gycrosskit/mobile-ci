@@ -36,7 +36,7 @@ def validate_toolchain_lock(lock):
         raise ValueError('Toolchain components must be a nonempty object')
     required = {'controllerImage', 'androidAgentImage', 'ohosAgentImage', 'jenkins', 'jenkinsPlugins',
                 'jdk', 'androidCommandLineTools', 'androidSDK', 'androidBuildTools', 'androidNDK',
-                'xcode', 'fastlane', 'harmonyCLT', 'harmonyNode', 'ohpm', 'hvigor', 'harmonySDK', 'groovy', 'dws', 'python'}
+                'xcode', 'fastlane', 'harmonyCLT', 'harmonyNode', 'ohpm', 'hvigor', 'harmonySDK', 'groovy', 'python'}
     if not required <= set(components):
         raise ValueError('Missing required toolchain components')
     for name, component in components.items():
@@ -121,14 +121,14 @@ def docker_build_args(role, lock=None):
     if role != 'android':
         raise ValueError('Unknown Docker build role: ' + role)
     bindings = {'ANDROID_COMMAND_LINE_TOOLS': 'androidCommandLineTools',
-                'CI_GROOVY': 'groovy', 'DWS': 'dws'}
+                'CI_GROOVY': 'groovy'}
     values = {'JENKINS_AGENT_IMAGE': components['androidAgentImage']['imageRef'],
               'ANDROID_PLATFORM_VERSION': components['androidSDK']['version'],
               'ANDROID_BUILD_TOOLS_VERSION': components['androidBuildTools']['version'],
               'ANDROID_NDK_VERSION': components['androidNDK']['version']}
     for prefix, name in bindings.items():
         values[prefix + '_VERSION'] = components[name]['version']
-        values[('DWS_LINUX_AMD64' if prefix == 'DWS' else prefix) + '_SHA256'] = components[name]['sha256']
+        values[prefix + '_SHA256'] = components[name]['sha256']
     return values
 
 

@@ -62,7 +62,7 @@ read_backup_resources() {
   [[ -z "${JENKINS_DEPLOYMENT_FILE:-}" ]] || { echo "Deployment backups require a separately reviewed resource plan." >&2; return 1; }
   check_compose_services
   resource_line="$("${COMPOSE[@]}" config --format json 2>/dev/null | python3 "${SCRIPT_DIR}/backup_resources.py")" || return 1
-  read -r VOLUME_NAME DWS_VOLUME_NAME OHOS_SIGNING_VOLUME_NAME AGENT_WORK_VOLUME_NAME \
+  read -r VOLUME_NAME OHOS_SIGNING_VOLUME_NAME AGENT_WORK_VOLUME_NAME \
     CONTAINER_NAME AGENT_CONTAINER_NAME OHOS_AGENT_CONTAINER_NAME LINUX_UID DELIVERY_RELATIVE \
     IMAGE_NAME BACKUP_PROJECT_ID <<< "${resource_line}"
 }

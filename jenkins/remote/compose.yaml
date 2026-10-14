@@ -85,6 +85,7 @@ services:
   android-agent:
     build:
       context: ./android-agent
+      target: private-sdk
     container_name: sxmqlive-jenkins-android-agent
     restart: unless-stopped
     init: true
@@ -100,8 +101,6 @@ services:
       JENKINS_AGENT_WORKDIR: /home/jenkins/agent
       DELIVERY_STATE_ROOT: /home/jenkins/agent/delivery-state
       CI_LINUX_MEMORY_LOCK: /home/jenkins/linux-build-memory/build.lock
-      DWS_CONFIG_DIR: /home/jenkins/.dws
-      DWS_LANG: zh
     volumes:
       - type: volume
         source: linux_build_memory
@@ -111,7 +110,6 @@ services:
       - jenkins_agent_secret:/run/jenkins-agent-bootstrap:ro
       - jenkins_agent_work:/home/jenkins/agent
       - gradle_cache:/home/jenkins/.gradle
-      - dws_state:/home/jenkins/.dws-state
     healthcheck:
       test: ["CMD-SHELL", "test -s /run/jenkins-agent-bootstrap/agent.secret && pgrep -f 'agent.jar' >/dev/null"]
       interval: 30s
@@ -126,6 +124,7 @@ services:
   pr-agent:
     build:
       context: ./android-agent
+      target: private-sdk
     container_name: sxmqlive-jenkins-pr-agent
     restart: unless-stopped
     init: true
@@ -172,7 +171,5 @@ volumes:
     name: sxmqlive_jenkins_pr_agent_work
   pr_gradle_cache:
     name: sxmqlive_pr_gradle_cache
-  dws_state:
-    name: sxmqlive_dws_state
   linux_build_memory:
     name: sxmqlive_linux_build_memory
