@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 
 EXCLUDED = {'AGENTS.md', 'SOURCE-MANIFEST.json', 'SOURCE-ORIGIN.json'}
 PRIVATE_DOCUMENTS = {'docs/发布流程.md', 'docs/仓库接线与切换.md', 'docs/模板扩展.md',
-                     'docs/第三方许可核查.md', 'docs/镜像许可核查.md'}
+                     'docs/第三方许可核查.md'}
 PRIVATE_PREFIXES = ('projects/', 'docs/audits/image-license')
 PUBLIC_SECTIONS = {'docs/GitHub接入.md': '## 2026-10-13 远端私有同仓验收',
                    'docs/Apple证书获取.md': '## 本次验收证据',

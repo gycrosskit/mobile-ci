@@ -75,7 +75,7 @@ class OhosAgentTest(unittest.TestCase):
         self.assertEqual("jenkins_agent_secret", mounts["/run/jenkins-agent-bootstrap"])
         self.assertEqual("gradle_cache", mounts["/home/jenkins/.gradle"])
         self.assertEqual("ohos_gradle_cache", mounts["/home/jenkins/.harmony-gradle"])
-        self.assertEqual("dws_state", mounts["/home/jenkins/.dws-state"])
+        self.assertNotIn("/home/jenkins/.dws-state", mounts)
         self.assertEqual("linux_build_memory", mounts["/home/jenkins/linux-build-memory"])
         self.assertNotIn("/home/jenkins/signing", mounts)
         self.assertNotIn("GRADLE_USER_HOME", build["environment"])

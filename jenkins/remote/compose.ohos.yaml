@@ -47,6 +47,7 @@ services:
     build:
       context: ./ohos-agent
       dockerfile: Dockerfile.compat
+      target: unified-runtime
       args:
         OHOS_AGENT_BASE_IMAGE: "${OHOS_AGENT_BASE_IMAGE:?统一Android/OHOS节点必须显式选择已审Android基础镜像}"
     image: sxmqlive-jenkins-ohos-agent:clt26-jdk21

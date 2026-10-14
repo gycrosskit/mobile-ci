@@ -63,4 +63,4 @@ Android/PR Job；实际 iOS profile、工具安装和运行验收须另行完成
    旧 `install-pr-agent-launchdaemon.sh` 是已有固定实例兼容入口，不会自动安装通用多 Agent 清单。
 5. `verify` 检查实际容器镜像、账号、CPU/内存、环境、完整挂载集合、Controller 健康和 Jenkins node 配置。
    native launchd、在线连接、SDK 真实 probes、实际构建、设备和交付验收分别完成；该检查不代替这些证据。
-   备份、迁移、DWS 与外网入口继续单独审核，不从新清单隐式绑定旧实例材料。
+   备份、迁移与外网入口继续单独审核，不从新清单隐式绑定旧实例材料。

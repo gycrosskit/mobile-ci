@@ -15,7 +15,6 @@ def compose_fixture(project):
     config['services'][roles['android']]['environment'] = {
         'JENKINS_AGENT_WORKDIR': work, 'DELIVERY_STATE_ROOT': work + '/delivery-state'}
     for role, target, name in (('controller', '/var/jenkins_home', 'home'),
-                              ('android', '/home/jenkins/.dws-state', 'dws'),
                               ('android', work, 'work'),
                               ('maintenance', project['signingBackup']['root'], 'signing')):
         config['volumes'][name] = {'name': project['id'] + '-' + name}
@@ -40,6 +39,7 @@ class BackupResourcesTest(unittest.TestCase):
         config = compose_fixture(project)
         config['services']['example-android']['environment']['DELIVERY_STATE_ROOT'] = '/home/jenkins/agent/receipts/delivery-state'
         value = resources(config, project)
+        self.assertNotIn('dws', value)
         self.assertEqual('example-mobile-home', value['home'])
         self.assertEqual('example-mobile-maintenance', value['maintenance'])
         self.assertEqual((2001, 'receipts/delivery-state'), (value['uid'], value['receiptRelative']))

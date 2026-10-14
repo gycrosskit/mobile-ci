@@ -56,7 +56,7 @@ Controller HOME 必须保留 jobs/Folders、nodes、全局配置、ACL、`script
 
 3. **Export**：在获授权且队列/构建空闲的维护窗口，复用旧实例的
    [backup.sh](../jenkins/remote/backup.sh) 和现有资源清单，保留覆盖台账、manifest 摘要、HOME、配对 secrets、
-   签名/认证及原交付回执。该脚本会停止/恢复相应服务，输出敏感 `tar.gz`；只有内部 DWS 状态自带加密，
+   签名/认证及原交付回执。该脚本会停止/恢复相应服务，输出敏感 `tar.gz`；
    整个 HOME 迁移包不自动外层加密。传输前由管理员按既有受审方式加密完整迁移包并核验接收人/摘要，
    解密后只在0700隔离目录供恢复入口读取。此处不新增加密引擎，也不在 plan 阶段执行备份。
 

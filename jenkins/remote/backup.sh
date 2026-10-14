@@ -15,7 +15,6 @@ PARTIAL_BUNDLE=""
 LOCK_DIR=""
 CONTROLLER_WAS_RUNNING="false"
 AGENT_WAS_RUNNING="false"
-DWS_STATE_FROM_VOLUME="false"
 OHOS_SIGNING_FROM_VOLUME="false"
 OHOS_AGENT_WAS_RUNNING="false"
 LINUX_STATE_FROM_VOLUME="false"
@@ -88,26 +87,6 @@ if [[ -n "${JENKINS_MAC_DELIVERY_STATE_ARCHIVE:-}" ]]; then
     "${TEMP_DIR}/mac-state.json" "${TEMP_DIR}/mac-copy.json"
 fi
 
-if docker volume inspect "${DWS_VOLUME_NAME}" >/dev/null 2>&1; then
-  DWS_STATE_FROM_VOLUME="true"
-elif [[ "${JENKINS_SKIP_DWS_STATE:-false}" == "true" ]]; then
-  echo "Warning: DWS state was explicitly excluded from this migration bundle." >&2
-else
-  command -v dws >/dev/null 2>&1 || {
-    echo "Missing DWS state volume and host dws command." >&2
-    echo "Install/login DWS, or explicitly set JENKINS_SKIP_DWS_STATE=true." >&2
-    exit 1
-  }
-  if ! DWS_DISABLE_KEYCHAIN=1 dws auth status --format json \
-    | python3 -c 'import json, sys; s = json.load(sys.stdin); sys.exit(0 if all(s.get(k) is True for k in ("authenticated", "token_valid", "refresh_token_valid")) else 1)'; then
-    echo "Host DWS auth is not in portable file-DEK mode." >&2
-    echo "Run the documented dws auth migrate-keychain dry-run and confirmed migration first." >&2
-    exit 1
-  fi
-  DWS_DISABLE_KEYCHAIN=1 dws auth export \
-    --output "${TEMP_DIR}/dws-state.tar.gz" >/dev/null
-fi
-
 if docker volume inspect "${OHOS_SIGNING_VOLUME_NAME}" >/dev/null 2>&1; then
   OHOS_SIGNING_FROM_VOLUME="true"
   if [[ "$(docker inspect --format '{{.State.Running}}' "${OHOS_AGENT_CONTAINER_NAME}" 2>/dev/null || true)" == "true" ]]; then
@@ -170,18 +149,6 @@ docker run --rm --user root --entrypoint chown \
   "${IMAGE_NAME}" \
   "$(id -u):$(id -g)" /backup/jenkins-home.tar.gz
 
-if [[ "${DWS_STATE_FROM_VOLUME}" == "true" ]]; then
-  docker run --rm --user root --entrypoint tar \
-    --volume "${DWS_VOLUME_NAME}:/source:ro" \
-    --volume "${TEMP_DIR}:/backup" \
-    "${IMAGE_NAME}" \
-    -C /source -czf /backup/dws-state.tar.gz .
-  docker run --rm --user root --entrypoint chown \
-    --volume "${TEMP_DIR}:/backup" \
-    "${IMAGE_NAME}" \
-    "$(id -u):$(id -g)" /backup/dws-state.tar.gz
-fi
-
 if [[ "${OHOS_SIGNING_FROM_VOLUME}" == "true" ]]; then
   # 仅迁移签名状态；Agent Secret 位于独立 bootstrap 卷，由新宿主重新生成。
   docker run --rm --user root --entrypoint tar \
@@ -199,9 +166,6 @@ fi
 (
   cd "${TEMP_DIR}"
   ARCHIVES=(jenkins-home.tar.gz delivery-state-coverage.json controller-backup-policy.json)
-  if [[ -f dws-state.tar.gz ]]; then
-    ARCHIVES+=(dws-state.tar.gz)
-  fi
   if [[ -f ohos-signing.tar.gz ]]; then
     ARCHIVES+=(ohos-signing.tar.gz)
   fi

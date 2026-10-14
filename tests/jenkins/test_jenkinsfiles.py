@@ -667,7 +667,6 @@ class JenkinsfilesTest(unittest.TestCase):
             "jenkins_agent_work:/home/jenkins/agent",
             "DELIVERY_STATE_ROOT: /home/jenkins/agent/delivery-state",
             "gradle_cache:/home/jenkins/.gradle",
-            "dws_state:/home/jenkins/.dws-state", "name: sxmqlive_dws_state",
             "android-builder ohos-linux linux-build", "pr-agent:",
             "PR_AGENT_LABELS: pr-builder",
         ))
@@ -687,9 +686,7 @@ class JenkinsfilesTest(unittest.TestCase):
         self.assertContainsAll(dockerfile, (
             "jdk21", "https://mirror.nju.edu.cn/debian", '"platforms;android-${ANDROID_PLATFORM_VERSION}"',
             '"build-tools;${ANDROID_BUILD_TOOLS_VERSION}"', '"ndk;${ANDROID_NDK_VERSION}"',
-            "ANDROID_COMMAND_LINE_TOOLS_SHA256", "DWS_VERSION=1.0.61",
-            "DWS_LINUX_AMD64_SHA256", "/usr/local/bin/dws",
-            "/home/jenkins/.dws-state/keychain/dws-cli", "gitee-known-hosts",
+            "ANDROID_COMMAND_LINE_TOOLS_SHA256", "gitee-known-hosts",
             "SHA256:+ULzij2u99B9eWYFTw1Q4ErYG/aepHLbu96PAUCoV88",
         ))
 
@@ -801,32 +798,17 @@ class JenkinsfilesTest(unittest.TestCase):
         finally:
             fixture.doCleanups()
 
-    def test_remote_migration_includes_portable_dws_state(self):
-        backup = read_text(REMOTE_JENKINS_DIR / "backup.sh")
-        restore = read_text(REMOTE_JENKINS_DIR / "restore.sh")
-        dws_helper = read_text(REMOTE_JENKINS_DIR / "dws.sh")
-
-        for script in (backup, restore):
-            self.assertIn("read_backup_resources", script)
-            self.assertIn("${DWS_VOLUME_NAME}", script)
-            self.assertIn("dws-state.tar.gz", script)
-
-        self.assertContainsAll(backup, (
-            "DWS_DISABLE_KEYCHAIN=1 dws auth export", "JENKINS_SKIP_DWS_STATE",
-        ))
-        self.assertLess(
-            backup.index("DWS_DISABLE_KEYCHAIN=1 dws auth status"),
-            backup.index('docker stop "${AGENT_CONTAINER_NAME}"'),
-        )
-        self.assertContainsAll(dws_helper, (
-            "run_dws auth login --device", "run_dws auth status", "refresh_token_valid",
-        ))
-        self.assertNotIn("--force", dws_helper)
-        self.assertContainsAll(dws_helper, ('source "${SCRIPT_DIR}/compose-context.sh"', '"${ANDROID_SERVICE}"'))
-
-        verify = read_text(REMOTE_JENKINS_DIR / "verify.sh")
-        self.assertIn('dws version | grep -F v1.0.61', verify)
-        self.assertContainsNone(verify, ("dws auth", "token_valid", "refresh_token_valid"))
+    def test_unused_dws_is_not_required_by_runtime_or_new_backups(self):
+        dockerfile = read_text(REMOTE_JENKINS_DIR / 'android-agent' / 'Dockerfile')
+        compose = read_text(REMOTE_JENKINS_DIR / 'compose.yaml')
+        verify = read_text(REMOTE_JENKINS_DIR / 'verify.sh')
+        backup = read_text(REMOTE_JENKINS_DIR / 'backup.sh')
+        self.assertNotIn('dws', dockerfile.lower())
+        self.assertNotIn('dws', compose.lower())
+        self.assertNotIn('dws version', verify)
+        self.assertNotIn('dws auth', backup)
+        self.assertNotIn('dws-state.tar.gz', backup)
+        self.assertFalse((REMOTE_JENKINS_DIR / 'dws.sh').exists())
 
     def test_mac_build_agent_uses_service_fastlane_and_keeps_signing_temporary(self):
         installer = read_text(LOCAL_JENKINS_DIR / "install-pr-agent-launchdaemon.sh")

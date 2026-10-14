@@ -49,6 +49,7 @@ class PublicSourceExportTest(unittest.TestCase):
             self.put(name, "EXCLUDED TEST MATERIAL\n")
         for name in exporter.RUNBOOKS:
             self.put(name, "PRIVATE TEST HOST DETAILS\n")
+        self.put("docs/镜像许可核查.md", "generic SDK-free image instructions\n")
         self.put("docs/部署.md", "generic deployment\n")
         self.put("docs/运行验收.md", "generic validation\n")
         for name in exporter.PRIVATE_DOCUMENTS:
@@ -67,6 +68,7 @@ class PublicSourceExportTest(unittest.TestCase):
             self.assertNotIn(name, contents)
         self.assertFalse(any(name.startswith(".git/") for name in contents))
         self.assertIn("untracked.py", contents)
+        self.assertEqual(b"generic SDK-free image instructions\n", contents["docs/镜像许可核查.md"])
         for name in exporter.RUNBOOKS:
             self.assertEqual(exporter.NEUTRAL_RUNBOOK.encode(), contents[name])
             self.assertNotIn(b"PRIVATE TEST HOST DETAILS", contents[name])

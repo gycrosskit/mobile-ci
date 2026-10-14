@@ -26,7 +26,7 @@ services = tuple(roles.values())
 white_env = {
     "DELIVERY_STATE_ROOT", "CI_LINUX_MEMORY_LOCK", "ANDROID_SDK_ROOT",
     "HARMONY_CLT_HOME", "HARMONY_GRADLE_USER_HOME", "SIGNING_MAINTENANCE_ROOT",
-    "JAVA_OPTS", "GRADLE_USER_HOME", "DWS_CONFIG_DIR", "JENKINS_URL",
+    "JAVA_OPTS", "GRADLE_USER_HOME", "JENKINS_URL",
     "JENKINS_AGENT_NAME", "JENKINS_AGENT_WORKDIR", "JENKINS_AGENT_SECRET_FILE",
     "ANDROID_AGENT_NAME", "ANDROID_AGENT_LABELS", "ANDROID_AGENT_REMOTE_FS",
     "PR_AGENT_NAME", "PR_AGENT_LABELS", "PR_AGENT_REMOTE_FS",
@@ -138,7 +138,7 @@ maintenance = r'''
   test -d "${SIGNING_MAINTENANCE_ROOT}"
   test "$(stat -c '%u:%a' "${SIGNING_MAINTENANCE_ROOT}")" = "$(id -u):700"
 '''
-for service, checks in ((roles['android'], android + harmony + receipts + '\n dws version | grep -F v1.0.61'),
+for service, checks in ((roles['android'], android + harmony + receipts),
                         (roles['pr'], android), (roles['maintenance'], harmony + maintenance)):
     run(compose + ["exec", "--no-TTY", service, "bash", "-euc", common + checks], service + " tools/state permissions")
     run(compose + ["exec", "--no-TTY", service, "python3", "-"], service + " Controller connection", input=r'''

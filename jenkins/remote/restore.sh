@@ -18,7 +18,6 @@ read_backup_resources
 TEMP_DIR="$(mktemp -d)"
 RESTORE_SUCCEEDED="false"
 CREATED_VOLUME="false"
-CREATED_DWS_VOLUME="false"
 CREATED_OHOS_SIGNING_VOLUME="false"
 CREATED_AGENT_WORK_VOLUME="false"
 DELIVERY_READY="false"
@@ -27,9 +26,6 @@ MAC_RESTORE_DIR="${JENKINS_MAC_DELIVERY_RESTORE_DIR:-}"
 cleanup() {
   if [[ "${CREATED_VOLUME}" == "true" && "${RESTORE_SUCCEEDED}" != "true" ]]; then
     docker volume rm "${VOLUME_NAME}" >/dev/null 2>&1 || true
-  fi
-  if [[ "${CREATED_DWS_VOLUME}" == "true" && "${RESTORE_SUCCEEDED}" != "true" ]]; then
-    docker volume rm "${DWS_VOLUME_NAME}" >/dev/null 2>&1 || true
   fi
   if [[ "${CREATED_OHOS_SIGNING_VOLUME}" == "true" && "${RESTORE_SUCCEEDED}" != "true" ]]; then
     docker volume rm "${OHOS_SIGNING_VOLUME_NAME}" >/dev/null 2>&1 || true
@@ -77,13 +73,6 @@ tar -xzf "${ARCHIVE_PATH}" -C "${TEMP_DIR}"
   exit 1
 }
 
-if [[ -f "${TEMP_DIR}/dws-state.tar.gz" ]] \
-  && docker volume inspect "${DWS_VOLUME_NAME}" >/dev/null 2>&1; then
-  echo "Refusing to overwrite existing Docker volume: ${DWS_VOLUME_NAME}" >&2
-  echo "Restore only on a new host, or back up and remove the unused volume manually." >&2
-  exit 1
-fi
-
 if [[ -f "${TEMP_DIR}/ohos-signing.tar.gz" ]]; then
   if docker volume inspect "${OHOS_SIGNING_VOLUME_NAME}" >/dev/null 2>&1; then
     echo "Refusing to overwrite existing Docker volume: ${OHOS_SIGNING_VOLUME_NAME}" >&2
@@ -103,6 +92,10 @@ fi
     shasum -a 256 --check manifest.sha256
   fi
 )
+
+if [[ -f "${TEMP_DIR}/dws-state.tar.gz" ]]; then
+  echo "Legacy DWS authentication archive verified and skipped; preserved in the original migration bundle." >&2
+fi
 
 # 回执与 coverage 必须先验完，不能在创建卷以后才发现恢复不完整或越界。
 DELIVERY_READY="$(python3 - "${SCRIPT_DIR}" "${TEMP_DIR}" "${MAC_RESTORE_DIR}" "${BACKUP_PROJECT_ID}" "${LINUX_UID}" "${DELIVERY_RELATIVE}" <<'PY'
@@ -170,20 +163,6 @@ docker run --rm --user root --entrypoint chown \
   "${IMAGE_NAME}" \
   -R "${LINUX_UID}:${LINUX_UID}" /target
 
-if [[ -f "${TEMP_DIR}/dws-state.tar.gz" ]]; then
-  docker volume create "${DWS_VOLUME_NAME}" >/dev/null
-  CREATED_DWS_VOLUME="true"
-  docker run --rm --user root --entrypoint tar \
-    --volume "${DWS_VOLUME_NAME}:/target" \
-    --volume "${TEMP_DIR}:/backup:ro" \
-    "${IMAGE_NAME}" \
-    -C /target -xzf /backup/dws-state.tar.gz
-  docker run --rm --user root --entrypoint chown \
-    --volume "${DWS_VOLUME_NAME}:/target" \
-    "${IMAGE_NAME}" \
-    -R "${LINUX_UID}:${LINUX_UID}" /target
-fi
-
 if [[ -f "${TEMP_DIR}/ohos-signing.tar.gz" ]]; then
   docker volume create "${OHOS_SIGNING_VOLUME_NAME}" >/dev/null
   CREATED_OHOS_SIGNING_VOLUME="true"
@@ -229,11 +208,6 @@ fi
 RESTORE_SUCCEEDED="true"
 
 echo "Restored Jenkins home volume: ${VOLUME_NAME}"
-if [[ "${CREATED_DWS_VOLUME}" == "true" ]]; then
-  echo "Restored encrypted DWS state volume: ${DWS_VOLUME_NAME}"
-else
-  echo "Warning: legacy bundle has no DWS state; run dws.sh login after startup." >&2
-fi
 if [[ "${CREATED_OHOS_SIGNING_VOLUME}" == "true" ]]; then
   echo "Restored private OHOS signing state volume: ${OHOS_SIGNING_VOLUME_NAME}"
 fi

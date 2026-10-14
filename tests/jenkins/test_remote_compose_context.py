@@ -20,8 +20,9 @@ class RemoteComposeContextTest(unittest.TestCase):
         self.remote = self.root / 'jenkins/remote'
         self.remote.mkdir(parents=True)
         shutil.copyfile(REMOTE.parents[1] / 'project_config.py', self.root / 'project_config.py')
-        shutil.copytree(REMOTE.parents[1] / 'projects', self.root / 'projects')
-        for name in ('compose-context.sh', 'stack.sh', 'verify.sh', 'restore.sh', 'backup_resources.py', 'dws.sh', 'public.sh'):
+        (self.root / 'projects').mkdir()
+        shutil.copyfile(REMOTE.parents[1] / 'tests/fixtures/legacy-project.json', self.root / 'projects/sxmqlive.json')
+        for name in ('compose-context.sh', 'stack.sh', 'verify.sh', 'restore.sh', 'backup_resources.py', 'public.sh'):
             shutil.copyfile(REMOTE / name, self.remote / name)
         (self.remote / 'check-host.sh').write_text('exit 0\n')
         for name in ('compose.yaml', 'compose.ohos.yaml'):
@@ -49,7 +50,6 @@ class RemoteComposeContextTest(unittest.TestCase):
                                           {'Type': 'bind', 'Source': str(self.bind), 'Destination': '/source', 'RW': False}]}
         for service, target, name in (
             ('controller', '/var/jenkins_home', 'home'),
-            ('android-agent', '/home/jenkins/.dws-state', 'dws'),
             ('ohos-maintenance', '/home/jenkins/signing', 'signing'),
         ):
             config['volumes'][name] = {'name': name}
@@ -128,10 +128,7 @@ elif args[:2] == ['volume', 'inspect']:
         self.assertEqual(['build', 'controller', 'android-agent', 'pr-agent'], self.commands()[-1][-4:])
         self.assertFalse(any('up' in cmd for cmd in self.commands()))
 
-    def test_dws_and_public_use_the_same_complete_private_manifest(self):
-        self.assertEqual(0, self.execute('dws.sh', 'version').returncode)
-        self.assertIn(str(self.manifest), self.commands()[-1])
-        self.assertEqual('android-agent', self.commands()[-1][-2])
+    def test_public_uses_the_same_complete_private_manifest(self):
         self.fixture['config']['services']['ngrok'] = {}
         result = self.execute('public.sh', 'start')
         self.assertEqual(0, result.returncode, result.stderr)
@@ -224,7 +221,6 @@ elif args[:2] == ['volume', 'inspect']:
         config = self.fixture['config']
         for service, target, name in (
             ('controller', '/var/jenkins_home', 'sxmqlive_jenkins_home'),
-            ('android-agent', '/home/jenkins/.dws-state', 'sxmqlive_dws_state'),
             ('android-agent', '/home/jenkins/agent', 'sxmqlive_jenkins_agent_work'),
             ('ohos-maintenance', '/home/jenkins/signing', 'sxmqlive_ohos_signing'),
         ):
