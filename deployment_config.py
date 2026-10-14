@@ -190,7 +190,6 @@ def _validate_deployment(value):
             require(not (role.startswith('android_') and a['target']['os'] != 'linux'), 'Android发布Pipeline的Linux预算尚未迁移；native Mac可配置但不能绑定此任务')
             require(not (role in {'app_pr', 'ci_pr'} and a['target']['os'] != 'linux'),
                     'PR主Pipeline仍使用Linux互斥/缓存或固定Groovy路径；native主节点尚未验收')
-            require(not (role == 'signing_maintenance' and a['name'] != 'signing-maintenance'), '维护Pipeline仍要求signing-maintenance固定node name')
             if role in {'app_pr', 'ci_pr', 'wiki'}:
                 require('ios-pr-builder' not in a['labels'], 'PR主节点不能是iOS PR子节点')
             candidates = [n for n in agents if JOB_LABELS[role] in n['labels'] and not (role in {'app_pr', 'ci_pr'} and 'ios-pr-builder' in n['labels'])]
@@ -198,6 +197,8 @@ def _validate_deployment(value):
             require(not role.startswith('android_') or all(n['target']['os'] == 'linux' for n in candidates), 'Android标签pool不能包含尚未迁移预算的Mac节点')
             require(role not in {'app_pr', 'ci_pr'} or all(n['target']['os'] == 'linux' for n in candidates),
                     'PR主Pipeline标签pool不能包含尚未迁移Linux契约的Mac节点')
+            require(role not in {'ios_test', 'ios_release'} or all('ios-pr-builder' not in n['labels'] for n in candidates),
+                    'iOS交付标签pool不能包含PR子节点；现有共享标签合同尚未隔离')
             node_roles[aid].add(role)
     for a in agents:
         require(not ('pr-builder' in a['labels'] and set(a['labels']) & {'android-builder', 'mac-build', 'linux-build', 'signing-maintenance'}), 'PR标签不能与生产构建/维护标签共用')
@@ -249,7 +250,22 @@ def job_agent_bindings(manifest, project):
     bindings = manifest['profiles'][project['id']]
     require(set(bindings) == set(project['jobs']), '实例绑定必须覆盖且仅覆盖profile实际Job角色')
     agents = {a['id']: a for a in manifest['agents']}
-    return {role: {'id': aid, 'name': agents[aid]['name'], 'label': JOB_LABELS[role], 'eligibleAgentIds': [a['id'] for a in manifest['agents'] if JOB_LABELS[role] in a['labels'] and not (role in {'app_pr', 'ci_pr'} and 'ios-pr-builder' in a['labels'])]} for role, aid in bindings.items()}
+    result = {}
+    for role, aid in bindings.items():
+        agent = agents[aid]
+        label = JOB_LABELS[role]
+        if role in {'signing_maintenance', 'signing_backup'}:
+            policy = project.get('signingBackup', {})
+            require(policy.get('node') == agent['name'] and policy.get('root') == agent['paths'].get('signing'),
+                    '签名维护/备份节点与目录必须匹配受信profile政策')
+            label = policy['node']
+            candidates = [a for a in manifest['agents'] if a['name'] == label or label in a['labels']]
+            require(len(candidates) == 1 and candidates[0]['id'] == aid,
+                    '受信签名节点标签不能同时调度其他节点')
+        else:
+            candidates = [a for a in manifest['agents'] if label in a['labels'] and not (role in {'app_pr', 'ci_pr'} and 'ios-pr-builder' in a['labels'])]
+        result[role] = {'id': aid, 'name': agent['name'], 'label': label, 'eligibleAgentIds': [a['id'] for a in candidates]}
+    return result
 
 
 def node_environment(a, url):

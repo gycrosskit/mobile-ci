@@ -162,6 +162,50 @@ class DeploymentConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(DeploymentConfigError, 'PR主Pipeline'):
             validate_deployment(self.m)
 
+    def test_signing_roles_match_reviewed_node_root_and_exclusive_scheduler_label(self):
+        node = copy.deepcopy(self.m['agents'][0])
+        node.update(id='maintenance-one', name='dedicated-signing', secretRef='maintenance-connection',
+                    capabilities=['maintenance', 'harmony'], labels=['signing-maintenance'])
+        node['sdks']['harmony'] = '/opt/harmony-clt'
+        node['paths']['signing'] = '/home/jenkins/signing'
+        self.m['agents'].append(node)
+        for role in ('signing_maintenance', 'signing_backup'):
+            with self.subTest(role=role):
+                self.m['profiles']['example-mobile'][role] = node['id']
+                manifest = validate_deployment(self.m)
+                project = {'id': 'example-mobile', 'jobs': {key: {} for key in manifest['profiles']['example-mobile']},
+                           'signingBackup': {'node': node['name'], 'root': node['paths']['signing']}}
+                binding = job_agent_bindings(manifest, project)[role]
+                self.assertEqual(node['name'], binding['label'])
+                self.assertEqual([node['id']], binding['eligibleAgentIds'])
+                for policy in ({}, {'node': 'other-signing', 'root': '/home/jenkins/signing'},
+                               {'node': node['name'], 'root': '/home/jenkins/other-signing'}):
+                    with self.assertRaisesRegex(DeploymentConfigError, '受信profile政策'):
+                        job_agent_bindings(manifest, project | {'signingBackup': policy})
+                manifest['agents'][0]['labels'].append(node['name'])
+                with self.assertRaisesRegex(DeploymentConfigError, '不能同时调度'):
+                    job_agent_bindings(manifest, project)
+                self.m['profiles']['example-mobile'].pop(role)
+
+    def test_ios_delivery_pool_cannot_share_pr_child_labels(self):
+        for role in ('ios_test', 'ios_release'):
+            for direct in (True, False):
+                with self.subTest(role=role, directlyBound=direct):
+                    manifest = copy.deepcopy(self.m)
+                    manifest['profiles']['example-mobile'][role] = 'mac-ios-one'
+                    if direct:
+                        manifest['agents'][-1]['labels'].append('ios-pr-builder')
+                    else:
+                        node = copy.deepcopy(manifest['agents'][-1])
+                        node.update(id='ios-pr-two', name='ios-pr-two', secretRef='ios-pr-two-connection')
+                        node['service'].update(user='ci_ios_two', uid=503, home='/private/var/lib/mobile-ci/ios-two')
+                        node['paths'] = {k: v.replace('/ios-one/', '/ios-two/') for k, v in node['paths'].items()}
+                        node['sdks']['remoting'] = node['sdks']['remoting'].replace('/ios-one/', '/ios-two/')
+                        node['labels'].append('ios-pr-builder')
+                        manifest['agents'].append(node)
+                    with self.assertRaisesRegex(DeploymentConfigError, 'iOS交付标签pool'):
+                        validate_deployment(manifest)
+
     def test_linux_pr_binding_rejects_native_mac_in_same_label_pool(self):
         node = self.m['agents'][-1]
         node['capabilities'] = ['ci', 'android']

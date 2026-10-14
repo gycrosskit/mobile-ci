@@ -22,15 +22,16 @@ Android/PR Job；实际 iOS profile、工具安装和运行验收须另行完成
   Job 与凭据引用；不携带 secret 内容，不接受应用/MR 配置路径。`primaryProjectId` 必须显式指向已绑定项目，Controller portal/promotion只服务该主profile；
   其余受信profile进入每Agent独立root-owned只读 `/etc/mobile-ci/projects` 卷。实际 Pipeline 沿用现有标签契约；同标签的
   等价 Agent 是调度 pool，归属声明不保证单独调度某个节点。计划列出 `eligibleAgentIds`。
-- PR 主节点禁止生产构建、iOS 构建和签名维护标签及共用任务。现有 iOS PR 子阶段的
-  `mac-build && ios-pr-builder` 属于受信单 Executor iOS 节点共享边界；另建物理隔离 iOS PR pool 需要同时迁移
-  Pipeline 标签策略。不能仅新增一个标签就宣称隔离完成。
+- PR 主节点禁止生产构建、iOS 构建和签名维护标签及共用任务。现有 iOS PR 子阶段使用
+  `mac-build && ios-pr-builder`；新清单拒绝将这些节点纳入 iOS 交付标签池。隔离的 iOS PR 与交付同时接入
+  需要迁移 Pipeline 标签策略，不能仅新增一个标签就宣称隔离完成。Secret 卷不得与 Controller、其他 Secret 或数据卷重名。
 - Linux 容器 CPU/内存限制进入 Compose；native Mac 资源为管理员容量预算，launchd 不提供等价容器限额。
   目前仅同一宿主的 Linux Compose 与远程原生 Mac；远程多 Compose 宿主分发尚未实现。
   Mac Android 现有发布 Pipeline 的 Linux 内存检查尚未迁移，因此清单允许准备节点但拒绝绑定 Android
   打包任务。Mac/arm64 Harmony 能力当前直接拒绝，官方 Mac 工具实测与 Pipeline 迁移通过前不宣称支持。
-  应用/CI PR 主任务同样保留 Linux 入口合同，拒绝绑定原生 Mac；iOS PR 子阶段保持现有 Mac 合同。
-  维护节点必须配置既有 Linux Harmony SDK 与独立签名目录，不接受缺少入口依赖的 maintenance-only 节点。
+  应用/CI PR 主任务同样保留 Linux 入口合同，绑定节点及所有同标签候选都必须是 Linux。
+  维护节点必须配置既有 Linux Harmony SDK 与独立签名目录，不接受缺少入口依赖的 maintenance-only 节点；
+  节点名与目录必须匹配受信 profile 的 signingBackup，实际调度标签只允许命中此节点。
 
 ## 新实例渲染与消费
 
