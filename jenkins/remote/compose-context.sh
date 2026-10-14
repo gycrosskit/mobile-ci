@@ -32,6 +32,15 @@ for compose_path in "${COMPOSE_FILES[@]}"; do
   COMPOSE+=(-f "${compose_path}")
 done
 CI_CONTEXT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -n "${JENKINS_DEPLOYMENT_FILE:-}" ]]; then
+  [[ -n "${JENKINS_COMPOSE_FILE:-}" && -z "${COMPOSE_FILE:-}" ]] || {
+    echo "Deployment requires its explicit generated JENKINS_COMPOSE_FILE without overlays." >&2; exit 1;
+  }
+  role_names="$(python3 "${SCRIPT_DIR}/deployment-runtime.py" context "${JENKINS_DEPLOYMENT_FILE}" "${JENKINS_COMPOSE_FILE}")" || exit 1
+  read -r -a SERVICES <<< "${role_names}"
+  CONTROLLER_SERVICE="${SERVICES[0]}"
+  ANDROID_SERVICE=""; PR_SERVICE=""; MAINTENANCE_SERVICE=""
+else
 role_names="$(python3 - "${CI_CONTEXT_ROOT}" "${JENKINS_CI_PROJECT:-sxmqlive}" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -46,8 +55,11 @@ ANDROID_SERVICE="${SERVICES[1]}"
 PR_SERVICE="${SERVICES[2]}"
 MAINTENANCE_SERVICE="${SERVICES[3]}"
 
+fi
+
 read_backup_resources() {
   local resource_line
+  [[ -z "${JENKINS_DEPLOYMENT_FILE:-}" ]] || { echo "Deployment backups require a separately reviewed resource plan." >&2; return 1; }
   check_compose_services
   resource_line="$("${COMPOSE[@]}" config --format json 2>/dev/null | python3 "${SCRIPT_DIR}/backup_resources.py")" || return 1
   read -r VOLUME_NAME DWS_VOLUME_NAME OHOS_SIGNING_VOLUME_NAME AGENT_WORK_VOLUME_NAME \

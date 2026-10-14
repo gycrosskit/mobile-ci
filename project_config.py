@@ -170,14 +170,16 @@ def validate_project(value, expected_id=None):
         raise ProjectConfigError("无效 Job 角色")
     names = []
     for role, job in jobs.items():
-        if not isinstance(job, dict) or set(job) != {"name", "pipeline"} or job.get("pipeline") != ROLE_PIPELINES[role]:
+        if (not isinstance(job, dict) or not {"name", "pipeline"} <= set(job)
+                or set(job) - {"name", "pipeline", "enabled"} or job.get("pipeline") != ROLE_PIPELINES[role]
+                or "enabled" in job and type(job["enabled"]) is not bool):
             raise ProjectConfigError("Job 必须使用对应受信 Pipeline")
         name = job.get("name", "")
         if not isinstance(name, str) or any(not matches(r"[A-Za-z0-9_\u4e00-\u9fff][A-Za-z0-9_. \u4e00-\u9fff-]*", part) for part in name.split("/")):
             raise ProjectConfigError("无效固定 Job 名称")
         names.append(name)
-    if len(names) != len(set(names)) or (not github and any(not set(roles) <= set(jobs) for platform, roles in PLATFORM_ROLES.items() if platform in platforms)):
-        raise ProjectConfigError("Job 身份重复或平台任务缺失")
+    if len(names) != len(set(names)):
+        raise ProjectConfigError("Job 身份重复")
     if any(role in jobs for platform, roles in PLATFORM_ROLES.items() if platform not in platforms for role in roles):
         raise ProjectConfigError("未声明的平台不能创建 Job")
     contract = value.get("contract", {})
@@ -261,7 +263,7 @@ def validate_project(value, expected_id=None):
     return copy.deepcopy(value)
 
 
-def _read_static_json(path, *, root_owned=False):
+def _read_static_json(path, *, root_owned=False, object_pairs_hook=None):
     if any(parent.is_symlink() for parent in (path, *path.parents)):
         raise ProjectConfigError("受信静态文件不能使用符号链接")
     descriptor = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -273,7 +275,7 @@ def _read_static_json(path, *, root_owned=False):
         data = source.read(65537)
         if len(data) > 65536:
             raise ProjectConfigError("受信静态文件超过大小上限")
-        return json.loads(data.decode("utf-8"))
+        return json.loads(data.decode("utf-8"), object_pairs_hook=object_pairs_hook)
 
 
 def _admin_projects_directory():

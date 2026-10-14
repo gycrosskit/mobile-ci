@@ -197,6 +197,30 @@ case 'proof':
         rejected(IllegalArgumentException) { core.verifyProof(p) }
     }
     break
+case 'independent_capabilities':
+    def directory = new File(args[3], 'trusted-projects')
+    def project = defaultProject()
+    project.jobs = [android_test:project.jobs.android_test]
+    project.jobs.android_test.enabled = false
+    installProject(directory, project)
+    assert core.loadProject(directory, project.id).jobs.android_test.enabled == false
+    project.jobs.android_test.enabled = true
+    installProject(directory, project)
+    assert core.loadProject(directory, project.id).jobs.android_test.enabled == true
+    ['false', 1, null].each { invalid ->
+        project.jobs.android_test.enabled = invalid
+        installProject(directory, project)
+        rejected(IllegalArgumentException) { core.loadProject(directory, project.id) }
+    }
+    project.jobs.android_test.enabled = false
+    project.jobs.android_test.shell = 'echo injected'
+    installProject(directory, project)
+    rejected(IllegalArgumentException) { core.loadProject(directory, project.id) }
+    project.jobs.android_test.remove('shell')
+    project.jobs.android_test.pipeline = 'arbitrary/Jenkinsfile'
+    installProject(directory, project)
+    rejected(IllegalArgumentException) { core.loadProject(directory, project.id) }
+    break
 case 'mixed_project':
     def mixedProject = {
         def project = defaultProject()
@@ -874,6 +898,9 @@ class CiAutoPromotionTests(unittest.TestCase):
 
     def test_controller_loads_mixed_sources_and_rejects_spoofed_repository_or_actions_profile(self):
         self.run_behavior('mixed_project')
+
+    def test_controller_accepts_independent_fixed_capability_and_rejects_non_boolean_or_executable_state(self):
+        self.run_behavior('independent_capabilities')
 
     def test_github_automation_blocks_gitee_proof_before_network_credentials_or_job_io(self):
         self.run_behavior('controller_github_blocked')

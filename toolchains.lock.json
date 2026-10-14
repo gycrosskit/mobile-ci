@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 1,
+  "components": {
+    "controllerImage": {
+      "version": "2.568.3-lts-jdk21",
+      "kind": "image",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "pinScope": "digest",
+      "imageRef": "jenkins/jenkins:2.568.3-lts-jdk21@sha256:c1e4c349365f6d16d88595b2c5f7e8ff39b8ae1d061f62420bac193b4b9616d0",
+      "sha256": "c1e4c349365f6d16d88595b2c5f7e8ff39b8ae1d061f62420bac193b4b9616d0",
+      "note": "Official registry-1.docker.io manifest index digest resolved read-only on 2026-10-14; this pins the base image, not installed apt packages or generated agent images."
+    },
+    "androidAgentImage": {
+      "version": "3385.vf1123fb_515da_-1-jdk21",
+      "kind": "image-base",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "digest",
+      "imageRef": "jenkins/inbound-agent:3385.vf1123fb_515da_-1-jdk21@sha256:6dbeabd484bb3926293de0b337117f7ad8bb2c0ba1a425b3e34e3d3983b5e1f9",
+      "sha256": "6dbeabd484bb3926293de0b337117f7ad8bb2c0ba1a425b3e34e3d3983b5e1f9",
+      "note": "Official registry-1.docker.io manifest index digest resolved read-only on 2026-10-14; this pins the base image, not installed apt packages or generated agent images."
+    },
+    "ohosAgentImage": {
+      "version": "21.0.11_10",
+      "kind": "image-base",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "digest",
+      "imageRef": "eclipse-temurin:21.0.11_10-jdk-jammy@sha256:dbfd085220ae632a0830166e443747d1ee89e9038d92e3b48c3e5e9d8292b9a7",
+      "sha256": "dbfd085220ae632a0830166e443747d1ee89e9038d92e3b48c3e5e9d8292b9a7"
+    },
+    "jenkins": {
+      "version": "2.568.3",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "exact-version"
+    },
+    "jdk": {
+      "version": "21",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "major-version",
+      "note": "Controller/Android tag pins JDK major only; OHOS image fixes vendor patch. Native hosts record java -version during preflight."
+    },
+    "androidCommandLineTools": {
+      "version": "15859902",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "archive-digest",
+      "sha256": "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583",
+      "url": "https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip"
+    },
+    "androidMacCommandLineTools": {
+      "version": null,
+      "kind": "tool",
+      "platforms": [
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "managed-unpinned",
+      "note": "Homebrew cask is not an archive pin; record actual revision and verify sdkmanager runtime."
+    },
+    "androidSDK": {
+      "version": "36",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "exact-version"
+    },
+    "androidBuildTools": {
+      "version": "35.0.0",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "exact-version"
+    },
+    "androidNDK": {
+      "version": "25.1.8937393",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "exact-version"
+    },
+    "androidPlatformTools": {
+      "version": null,
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "managed-unpinned",
+      "note": "sdkmanager platform-tools package changes; record source.properties revision."
+    },
+    "xcode": {
+      "version": "26.3",
+      "kind": "tool",
+      "platforms": [
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "exact-version"
+    },
+    "fastlane": {
+      "version": "2.238.0",
+      "kind": "tool",
+      "platforms": [
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "exact-version",
+      "note": "Only top-level gem version pinned; transitive gems and Ruby are not frozen."
+    },
+    "harmonyCLT": {
+      "version": "26.0.0.851",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "archive-digest",
+      "sha256": "ab604bd92721d5cbcafd154e6461d46b9f1b105e7b89eab04a9d046681198082",
+      "licenseSha256": "12730a76ed4c8b6acb20014d6303a32e3b8acbc8de742e1d6da683b3f81f9024"
+    },
+    "harmonyNode": {
+      "version": "24.14.1",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "clt-bundled"
+    },
+    "ohpm": {
+      "version": "26.0.0.630",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "clt-bundled"
+    },
+    "hvigor": {
+      "version": "6.26.8",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "clt-bundled"
+    },
+    "harmonySDK": {
+      "version": "26.0.0.105",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "clt-bundled"
+    },
+    "groovy": {
+      "version": "2.4.21",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "archive-digest",
+      "sha256": "de65260cf2070442e99882f2f3d72e7531725c1e6a257446cc0cea525c607bd0"
+    },
+    "dws": {
+      "version": "1.0.61",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "pinScope": "archive-digest",
+      "sha256": "a507356bc19edc4b868398bd99c803c81480c2e094b9efbb6ad74e2905089a4d"
+    },
+    "python": {
+      "version": "3.9",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "minimum-version",
+      "note": "Brew/apt patch is not pinned; preflight records actual executable version."
+    },
+    "ruby": {
+      "version": null,
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "managed-unpinned",
+      "note": "Distribution-managed dependency, not exactly reproducible; require runtime check before native/image acceptance."
+    },
+    "cocoapods": {
+      "version": null,
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "managed-unpinned",
+      "note": "Distribution-managed dependency, not exactly reproducible; require runtime check before native/image acceptance."
+    },
+    "brew": {
+      "version": null,
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "managed-unpinned",
+      "note": "Distribution-managed dependency, not exactly reproducible; require runtime check before native/image acceptance."
+    },
+    "aptPackages": {
+      "version": null,
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "managed-unpinned",
+      "note": "Distribution-managed dependency, not exactly reproducible; require runtime check before native/image acceptance."
+    },
+    "remoting": {
+      "version": null,
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64",
+        "darwin/amd64",
+        "darwin/arm64"
+      ],
+      "pinScope": "controller-coupled",
+      "note": "Existing launchers obtain remoting from trusted Controller; native deployment must separately review jar SHA256. No invented version or digest."
+    },
+    "jenkinsPlugins": {
+      "version": "plugins.txt",
+      "kind": "tool",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "pinScope": "file-digest",
+      "sha256": "df32a6414023085ec3fd99df48e535898be1caee1568d8df91536cd38ddf6a3f",
+      "note": "Direct plugin list only. Transitive resolution/plugins-resolved.txt and installed plugin binaries require actual custom image/runtime receipts; no arbitrary latest upgrade."
+    }
+  }
+}

@@ -1,5 +1,6 @@
 # SDK 由获授权管理员安装并只读挂载；公开镜像不包含或接受华为 SDK 许可。
-FROM eclipse-temurin:21.0.11_10-jdk-jammy@sha256:dbfd085220ae632a0830166e443747d1ee89e9038d92e3b48c3e5e9d8292b9a7
+ARG OHOS_JDK_IMAGE=eclipse-temurin:21.0.11_10-jdk-jammy@sha256:dbfd085220ae632a0830166e443747d1ee89e9038d92e3b48c3e5e9d8292b9a7
+FROM ${OHOS_JDK_IMAGE}
 
 USER root
 RUN apt-get update \

@@ -47,7 +47,14 @@ jobs:
           chmod 0444 "$GROOVY_TEST_CLASSPATH"
           java -cp "$GROOVY_TEST_CLASSPATH" groovy.ui.GroovyMain -e "assert GroovySystem.version == '2.4.21'"
       - name: Validate clean source, second project and public security contracts
-        run: python3 jenkins/run_public_checks.py
+        # 离线状态初始化器必须在真实 Linux 文件系统验证，不能用 skip 代替。
+        # 容器只挂合成 fixture，禁网且自动删除；不启动 Jenkins 服务。
+        run: |
+          set -euo pipefail
+          python3 toolchains.py check
+          image="$(python3 -c 'from toolchains import docker_build_args; print(docker_build_args("controller")["JENKINS_CONTROLLER_IMAGE"])')"
+          docker pull "$image"
+          DEPLOYMENT_LINUX_TEST_IMAGE="$image" python3 jenkins/run_public_checks.py
   native-preflight:
     runs-on: macos-14
     timeout-minutes: 5

@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "id": "example-deployment",
+  "controller": {
+    "id": "controller",
+    "name": "controller",
+    "host": {
+      "os": "linux",
+      "arch": "amd64"
+    },
+    "target": {
+      "os": "linux",
+      "arch": "amd64"
+    },
+    "runtime": "compose",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "service": {
+      "user": "jenkins",
+      "uid": 1000,
+      "gid": 1000,
+      "home": "/var/jenkins_home"
+    },
+    "resources": {
+      "cpu": 2,
+      "memoryGiB": 2,
+      "executors": 0
+    },
+    "stateRoot": "/opt/mobile-ci/example-deployment",
+    "url": "https://ci.example.invalid",
+    "httpPort": 18080
+  },
+  "agents": [
+    {
+      "id": "android-one",
+      "name": "android-one",
+      "host": {
+        "os": "linux",
+        "arch": "amd64"
+      },
+      "target": {
+        "os": "linux",
+        "arch": "amd64"
+      },
+      "runtime": "compose",
+      "imageId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "service": {
+        "user": "jenkins",
+        "uid": 1000,
+        "gid": 1000,
+        "home": "/home/jenkins"
+      },
+      "resources": {
+        "cpu": 2,
+        "memoryGiB": 6,
+        "executors": 1
+      },
+      "labels": [
+        "android-builder"
+      ],
+      "capabilities": [
+        "android",
+        "ci"
+      ],
+      "paths": {
+        "work": "/home/jenkins/agent",
+        "cache": "/home/jenkins/gradle-cache",
+        "runtime": "/home/jenkins/runtime",
+        "secret": "/home/jenkins/agent-secret"
+      },
+      "sdks": {
+        "android": "/opt/android-sdk"
+      },
+      "secretRef": "android-one-connection",
+      "expectedVersions": {
+        "python": "3.11.2"
+      }
+    },
+    {
+      "id": "pr-one",
+      "name": "pr-one",
+      "host": {
+        "os": "linux",
+        "arch": "amd64"
+      },
+      "target": {
+        "os": "linux",
+        "arch": "amd64"
+      },
+      "runtime": "compose",
+      "imageId": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "service": {
+        "user": "jenkins",
+        "uid": 1000,
+        "gid": 1000,
+        "home": "/home/jenkins"
+      },
+      "resources": {
+        "cpu": 2,
+        "memoryGiB": 6,
+        "executors": 1
+      },
+      "labels": [
+        "pr-builder"
+      ],
+      "capabilities": [
+        "android",
+        "ci"
+      ],
+      "paths": {
+        "work": "/home/jenkins/agent",
+        "cache": "/home/jenkins/gradle-cache",
+        "runtime": "/home/jenkins/runtime",
+        "secret": "/home/jenkins/agent-secret"
+      },
+      "sdks": {
+        "android": "/opt/android-sdk"
+      },
+      "secretRef": "pr-one-connection",
+      "expectedVersions": {
+        "python": "3.11.2"
+      }
+    }
+  ],
+  "profiles": {
+    "example-mobile": {
+      "android_test": "android-one",
+      "android_release": "android-one",
+      "app_pr": "pr-one",
+      "ci_pr": "pr-one"
+    }
+  },
+  "primaryProjectId": "example-mobile"
+}

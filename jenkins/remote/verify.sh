@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/compose-context.sh"
 check_compose_services
+if [[ -n "${JENKINS_DEPLOYMENT_FILE:-}" ]]; then
+  exec python3 "${SCRIPT_DIR}/deployment-runtime.py" verify "${JENKINS_DEPLOYMENT_FILE}" "${JENKINS_COMPOSE_FILE}"
+fi
 
 # 配置和 inspect 只在内存比较，不输出带凭据的配置或工具日志。
 python3 - "${CI_CONTEXT_ROOT}" "${JENKINS_CI_PROJECT:-sxmqlive}" "${COMPOSE[@]}" <<'PY'

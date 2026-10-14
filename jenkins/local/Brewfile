@@ -1,4 +1,4 @@
-# macOS Jenkins Agent 的基础可重复安装清单。Xcode 下载工具按 --install-xcode 单独安装。
+# macOS Jenkins Agent 的基础安装清单（Brew 包版本未冻结）。Xcode 下载工具按 --install-xcode 单独安装。
 brew "openjdk@21"
 brew "python"
 brew "cocoapods"

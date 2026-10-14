@@ -31,11 +31,16 @@
 本地示例检查需要 Git、Python 3.9+、JDK 17 或 21；生产 Jenkins/Agent 固定 JDK 21。
 Groovy 行为检查使用与 Controller 相同的 Groovy 2.4.21，
 由 `GROOVY_TEST_CLASSPATH` 绑定受信 jar，不能用 Gradle 自带版本代替。部署需 Docker 与 Compose v2、OpenSSH。
-Android SDK/NDK 以 [Agent Dockerfile](jenkins/remote/android-agent/Dockerfile) 为准；iOS 需要 macOS、
+版本与 OS/arch 以 [toolchains.lock.json](toolchains.lock.json) 为统一受审清单；
+`python3 toolchains.py check` 核对安装器/Docker 默认值与兼容文件，`build-args` 输出固定构建参数。
+完整自定义 image ID、运行版本和未冻结依赖需单独验收。iOS 需要 macOS、
 [固定 Xcode](jenkins/local/.xcode-version)、[Brewfile](jenkins/local/Brewfile) 和
 [固定 Fastlane](delivery/.fastlane-version)；鸿蒙还需项目对应的官方 SDK、Hvigor/ohpm 和签名工具。
 鸿蒙可用[公开基础镜像与离线 CLT 安装器](docs/鸿蒙环境重建.md)重建；SDK 由获授权管理员获取，
 不随源码或镜像分发。既有统一 Android/OHOS 节点使用显式审核的兼容基础，不自动迁移。
+
+[逐 Agent 部署配置](docs/部署.md#工具版本与每个-agent-的配置)、[新 Mac 迁移方案](docs/新Mac迁移.md)
+和[任务与实例管理](docs/任务管理.md)提供离线 plan/validate/render；本轮未部署生产或执行新 Mac 恢复。
 
 ## Quickstart：先检查，再接入
 

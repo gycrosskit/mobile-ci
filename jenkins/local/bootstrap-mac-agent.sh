@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BREWFILE="${SCRIPT_DIR}/Brewfile"
 XCODE_BREWFILE="${SCRIPT_DIR}/Brewfile.xcode"
-XCODE_VERSION_FILE="${SCRIPT_DIR}/.xcode-version"
+TOOLCHAIN_LOCK_CLI="${REPO_ROOT}/toolchains.py"
 TRUSTED_XCODES_TAP="xcodesorg/made"
 
 ACTION="check"
@@ -25,7 +25,7 @@ Usage:
     [--install-controller-tunnel] [--connect-agent] [--install-health-monitor]
 
 Options:
-  --install-xcode            按仓库 .xcode-version 交互式安装并选择 Xcode。
+  --install-xcode            按 toolchains.lock.json 交互式安装并选择 Xcode。
   --accept-xcode-license     执行 Xcode 首次启动任务并接受对应许可证。
   --accept-android-licenses  接受服务账号 Android SDK 许可证并安装固定版本 SDK。
   --install-controller-tunnel 安装到 Linux Controller 的常驻 SSH 隧道。
@@ -114,7 +114,7 @@ require_command() {
 
 check_xcode() {
   local developer_dir required_version selected_version
-  required_version="$(tr -d '[:space:]' < "${XCODE_VERSION_FILE}")"
+  required_version="$(python3 "${TOOLCHAIN_LOCK_CLI}" version xcode)"
   developer_dir="$(xcode-select -p 2>/dev/null || true)"
   [[ -n "${developer_dir}" && -d "${developer_dir}" ]] || {
     echo "Xcode is unavailable. Install full Xcode and run xcode-select first." >&2
@@ -133,11 +133,7 @@ check_xcode() {
 
 install_xcode() {
   local required_version
-  [[ -s "${XCODE_VERSION_FILE}" ]] || {
-    echo "Missing Xcode version file: ${XCODE_VERSION_FILE}" >&2
-    exit 1
-  }
-  required_version="$(tr -d '[:space:]' < "${XCODE_VERSION_FILE}")"
+  required_version="$(python3 "${TOOLCHAIN_LOCK_CLI}" version xcode)"
   require_command xcodes
   # xcodes 从 Apple 下载 Xcode，并在终端交互式请求 Apple ID、2FA 和管理员密码。
   if ! xcodes select "${required_version}"; then
@@ -150,21 +146,22 @@ finish_xcode_first_launch() {
   if [[ "${ACCEPT_XCODE_LICENSE}" != "true" ]]; then
     return
   fi
-  echo "将执行 Xcode 首次启动任务并接受 ${XCODE_VERSION_FILE} 中版本对应的许可证。"
+  echo "将执行 Xcode 首次启动任务并接受 toolchains.lock.json 中版本对应的许可证。"
   sudo xcodebuild -runFirstLaunch
 }
 
 resolve_java_home() {
-  local candidate prefix
+  local candidate prefix required_jdk
+  required_jdk="$(python3 "${TOOLCHAIN_LOCK_CLI}" version jdk)"
   for candidate in \
     "${JAVA_HOME:-}" \
-    "$(/usr/libexec/java_home -v 21 2>/dev/null || true)"; do
+    "$(/usr/libexec/java_home -v "${required_jdk}" 2>/dev/null || true)"; do
     if [[ -n "${candidate}" && -x "${candidate}/bin/java" ]]; then
       printf '%s\n' "${candidate}"
       return
     fi
   done
-  prefix="$(brew --prefix openjdk@21 2>/dev/null || true)"
+  prefix="$(brew --prefix "openjdk@${required_jdk}" 2>/dev/null || true)"
   candidate="${prefix}/libexec/openjdk.jdk/Contents/Home"
   [[ -n "${prefix}" && -x "${candidate}/bin/java" ]] || return 1
   printf '%s\n' "${candidate}"
@@ -191,17 +188,19 @@ install_dependencies() {
 }
 
 check_toolchain() {
-  local java_home java_version tool_path
+  local java_home java_version tool_path required_jdk
+  required_jdk="$(python3 "${TOOLCHAIN_LOCK_CLI}" version jdk)"
   require_command brew
+  python3 "${TOOLCHAIN_LOCK_CLI}" check >/dev/null
   check_xcode
   java_home="$(resolve_java_home)"
   [[ -x "${java_home}/bin/java" ]] || {
-    echo "JDK 21 is unavailable." >&2
+    echo "JDK ${required_jdk} is unavailable." >&2
     return 1
   }
   java_version="$("${java_home}/bin/java" -version 2>&1 | head -1)"
-  [[ "${java_version}" == *'"21.'* ]] || {
-    echo "JDK 21 is required, found: ${java_version:-unknown}." >&2
+  [[ "${java_version}" == *"\"${required_jdk}."* ]] || {
+    echo "JDK ${required_jdk} is required, found: ${java_version:-unknown}." >&2
     return 1
   }
   tool_path="$(agent_tool_path "${java_home}")"

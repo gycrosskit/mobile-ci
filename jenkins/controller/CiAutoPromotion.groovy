@@ -118,7 +118,8 @@ class CiAutoPromotion {
             signing_maintenance:'jenkins/Jenkinsfile.signing.maintenance', signing_backup:'jenkins/Jenkinsfile.signing.backup', alert:'jenkins/Jenkinsfile.alert-test']
         value.jobs.each { role, job ->
             if (!(job instanceof Map) || !roles.containsKey(role) || job.pipeline != roles[role] ||
-                job.keySet() != ['name','pipeline'] as Set || !(job.name instanceof String) ||
+                !job.keySet().containsAll(['name','pipeline']) || !['name','pipeline','enabled'].containsAll(job.keySet()) ||
+                (job.containsKey('enabled') && !(job.enabled instanceof Boolean)) || !(job.name instanceof String) ||
                 !job.name.split('/').every { it ==~ /[A-Za-z0-9_\u4e00-\u9fff][A-Za-z0-9_. \u4e00-\u9fff-]*/ }) {
                 throw new IllegalArgumentException('Job 必须绑定固定角色和 Pipeline')
             }
@@ -148,7 +149,7 @@ class CiAutoPromotion {
                 backup.recipientSha256 != backup.legacyRecipientSha256)) throw new IllegalArgumentException('新接收人不能认领旧备份')
         }
         [android:['android_test','android_release'],ios:['ios_test','ios_release'],harmony:['harmony_test','harmony_release']].each { name, required ->
-            if (value.platforms.containsKey(name) ? !value.jobs.keySet().containsAll(required) : required.any { value.jobs.containsKey(it) }) throw new IllegalArgumentException('平台与 Job 不一致')
+            if (!value.platforms.containsKey(name) && required.any { value.jobs.containsKey(it) }) throw new IllegalArgumentException('平台与 Job 不一致')
         }
         def contract = value.contract ?: [:]
         if (!(contract instanceof Map) || !['toolDir','testDir','brandsFile','manifestTest','buildSystem','requiredTools'].containsAll(contract.keySet()) ||

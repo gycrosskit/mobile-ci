@@ -1,6 +1,9 @@
-ARG JENKINS_AGENT_IMAGE=jenkins/inbound-agent:3385.vf1123fb_515da_-1-jdk21
+ARG JENKINS_AGENT_IMAGE=jenkins/inbound-agent:3385.vf1123fb_515da_-1-jdk21@sha256:6dbeabd484bb3926293de0b337117f7ad8bb2c0ba1a425b3e34e3d3983b5e1f9
 FROM ${JENKINS_AGENT_IMAGE}
 
+ARG ANDROID_PLATFORM_VERSION=36
+ARG ANDROID_BUILD_TOOLS_VERSION=35.0.0
+ARG ANDROID_NDK_VERSION=25.1.8937393
 ARG ANDROID_COMMAND_LINE_TOOLS_VERSION=15859902
 ARG ANDROID_COMMAND_LINE_TOOLS_SHA256=4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583
 ARG CI_GROOVY_VERSION=2.4.21
@@ -74,9 +77,9 @@ RUN curl --fail --silent --show-error --location \
 RUN yes | sdkmanager --licenses >/dev/null \
     && sdkmanager \
         "platform-tools" \
-        "platforms;android-36" \
-        "build-tools;35.0.0" \
-        "ndk;25.1.8937393" \
+        "platforms;android-${ANDROID_PLATFORM_VERSION}" \
+        "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
+        "ndk;${ANDROID_NDK_VERSION}" \
     && chown -R jenkins:jenkins "${ANDROID_SDK_ROOT}"
 
 # DWS 的官方迁移包包含 config/ 与 keychain/dws-cli/。二者收拢到同一数据卷，
