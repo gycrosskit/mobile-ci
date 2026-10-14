@@ -607,9 +607,9 @@ class JenkinsfilesTest(unittest.TestCase):
         self.assertEqual(0, syntax.returncode, syntax.stderr)
         self.assertContainsAll(script, (
             'SERVICE_USER="${JENKINS_PR_SERVICE_USER:-_sxmqlive_pr}"',
-            'REQUIRED_ANDROID_PLATFORM="android-36"',
-            'REQUIRED_ANDROID_BUILD_TOOLS="35.0.0"',
-            'REQUIRED_ANDROID_NDK="25.1.8937393"',
+            'REQUIRED_ANDROID_PLATFORM="android-$(python3 "${TOOLCHAIN_LOCK_CLI}" version androidSDK)"',
+            'REQUIRED_ANDROID_BUILD_TOOLS="$(python3 "${TOOLCHAIN_LOCK_CLI}" version androidBuildTools)"',
+            'REQUIRED_ANDROID_NDK="$(python3 "${TOOLCHAIN_LOCK_CLI}" version androidNDK)"',
             'AuthenticationAuthority ";DisabledUser;"',
         ))
         self.assertContainsAll(script, (
@@ -685,8 +685,8 @@ class JenkinsfilesTest(unittest.TestCase):
         dockerfile = read_text(REMOTE_JENKINS_DIR / "android-agent" / "Dockerfile")
 
         self.assertContainsAll(dockerfile, (
-            "jdk21", "https://mirror.nju.edu.cn/debian", '"platforms;android-36"',
-            '"build-tools;35.0.0"', '"ndk;25.1.8937393"',
+            "jdk21", "https://mirror.nju.edu.cn/debian", '"platforms;android-${ANDROID_PLATFORM_VERSION}"',
+            '"build-tools;${ANDROID_BUILD_TOOLS_VERSION}"', '"ndk;${ANDROID_NDK_VERSION}"',
             "ANDROID_COMMAND_LINE_TOOLS_SHA256", "DWS_VERSION=1.0.61",
             "DWS_LINUX_AMD64_SHA256", "/usr/local/bin/dws",
             "/home/jenkins/.dws-state/keychain/dws-cli", "gitee-known-hosts",
@@ -836,7 +836,7 @@ class JenkinsfilesTest(unittest.TestCase):
             'FASTLANE_GEM_HOME="${FASTLANE_GEM_HOME_VALUE}"',
             'FASTLANE_GEM_HOME_VALUE="${SERVICE_HOME}/.local/share/fastlane/',
             'bash "${REPO_ROOT}/delivery/fastlane.sh" "$@"',
-            'service_fastlane --install', '.fastlane-version', '.xcode-version',
+            'service_fastlane --install', 'version fastlane', 'version xcode', 'toolchains.py',
             'export DEVELOPER_DIR="${DEVELOPER_DIR_VALUE}"',
             'TOOL_PATH="${RUBY_BIN%/*}:${BREW_PREFIX}/bin:',
         ))

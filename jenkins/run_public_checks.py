@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -81,7 +82,14 @@ def main():
     jar = jar.resolve()
     subprocess.run(['java', '-cp', str(jar), 'groovy.ui.GroovyMain', '-e',
                     "assert GroovySystem.version == '2.4.21'; assert System.getProperty('java.specification.version') == '21'"], check=True)
-    with tempfile.TemporaryDirectory(prefix='mobile-ci-public-') as directory:
+    # 私有部署输入拒绝可写祖先；测试树也使用同样受限的父链，不豁免该校验。
+    work_root = ROOT / 'build'
+    work_root.mkdir(mode=0o700, exist_ok=True)
+    info = work_root.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700 or any(parent.is_symlink() for parent in (work_root, *work_root.parents))):
+        raise ValueError('公共验收目录必须为本用户0700目录且没有符号链接')
+    with tempfile.TemporaryDirectory(prefix='mobile-ci-public-', dir=work_root) as directory:
         base = Path(directory).resolve()
         archive_path = base / 'source.tar.gz'
         export(archive_path)

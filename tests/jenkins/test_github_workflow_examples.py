@@ -78,7 +78,12 @@ class GitHubWorkflowExamplesTest(unittest.TestCase):
         commands = [step["run"] for step in steps if "run" in step]
         self.assertEqual(3, len(commands))
         self.assertEqual('test "$EXAMPLE_PROJECT_ID" = example-mobile', commands[0])
-        self.assertEqual(CORE_CHECK, commands[2])
+        self.assertIn('set -euo pipefail', commands[2])
+        self.assertIn('python3 toolchains.py check', commands[2])
+        self.assertIn('docker_build_args("controller")["JENKINS_CONTROLLER_IMAGE"]', commands[2])
+        self.assertIn('docker pull "$image"', commands[2])
+        self.assertTrue(commands[2].rstrip().endswith('DEPLOYMENT_LINUX_TEST_IMAGE="$image" ' + CORE_CHECK))
+        self.assertNotIn('||', commands[2])
         self.assertTrue((ROOT / "examples/second-project/validate.py").is_file())
         self.assertTrue((ROOT / "jenkins/run_public_checks.py").is_file())
         runtime = commands[1]

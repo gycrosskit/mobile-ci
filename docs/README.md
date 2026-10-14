@@ -3,7 +3,7 @@
 通用工具已公开于 [gycrosskit/mobile-ci](https://github.com/gycrosskit/mobile-ci)；应用继续私有 Gitee，消费管理员审核的固定工具 Commit。
 
 1. [项目接入与复用](项目接入.md)：可信项目配置、薄构建适配和账户隔离。
-2. [通用部署](部署.md)与[运行验收](运行验收.md)：角色、配置、升级和独立验收。
+2. [通用部署](部署.md)、[运行验收](运行验收.md)、[新 Mac 迁移](新Mac迁移.md)与[任务管理](任务管理.md)：统一锁版、独立节点、迁移方案和验收。
 3. [GitHub 迁移与工具安全自测](GitHub迁移.md)：公共源码、Actions 与私有兼容边界。
 4. [开源准备](开源准备.md)与[上游许可](../THIRD_PARTY.md)：源码范围及镜像/SDK阻塞。
 5. [第二项目示例](../examples/second-project/README.md)与[可选应用 PR 入口](GitHub接入.md)：离线验证和按需接入。

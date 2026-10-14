@@ -77,7 +77,8 @@ class RepositoryContractTest(unittest.TestCase):
         moved = copy.deepcopy(original); moved["contract"]["testDir"] = "other-tests"; mutations.append(moved)
         foreign = copy.deepcopy(original); foreign["credentials"]["scm"] = "other-credential"; mutations.append(foreign)
         node = copy.deepcopy(original); node["portal"]["macNode"] = "other-mac"; mutations.append(node)
-        with patch.object(contract_checker, "CI_ROOT", self.root), patch.object(project_config, "PROJECTS_DIR", profiles):
+        with patch.object(contract_checker, "CI_ROOT", self.root), patch.object(project_config, "PROJECTS_DIR", profiles), \
+                patch.object(project_config, "ADMIN_PROJECTS_DIR", self.root / 'absent-admin-profiles'):
             contract_checker.check_project_baseline(base, "sxmqlive")
             for changed in mutations:
                 path.write_text(json.dumps(changed))

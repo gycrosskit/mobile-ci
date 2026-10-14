@@ -12,7 +12,12 @@ import subprocess
 import tempfile
 import zipfile
 
+# 独立镜像保留常量；toolchains.py check 在晋级时核对根工具链锁，不能单独升级。
 VERSION = '26.0.0.851'
+NODE_VERSION = '24.14.1'
+OHPM_VERSION = '26.0.0.630'
+HVIGOR_VERSION = '6.26.8'
+SDK_VERSION = '26.0.0.105'
 SHA256 = 'ab604bd92721d5cbcafd154e6461d46b9f1b105e7b89eab04a9d046681198082'
 LICENSE_SHA256 = '12730a76ed4c8b6acb20014d6303a32e3b8acbc8de742e1d6da683b3f81f9024'
 MAX_FILES, MAX_BYTES, MAX_FILE_BYTES = 250_000, 20 * 1024**3, 2 * 1024**3
@@ -39,16 +44,16 @@ def check_tree(root, runtime=False):
     if not re.search(r'^# Version: ' + re.escape(VERSION) + r'$',
                      (root / 'version.txt').read_text(), re.M):
         raise ValueError('CLT version mismatch')
-    for relative, expected in (('hvigor/hvigor/package.json', '6.26.8'),
-                               ('hvigor/hvigor-ohos-plugin/package.json', '6.26.8'),
-                               ('ohpm/package.json', '26.0.0.630')):
+    for relative, expected in (('hvigor/hvigor/package.json', HVIGOR_VERSION),
+                               ('hvigor/hvigor-ohos-plugin/package.json', HVIGOR_VERSION),
+                               ('ohpm/package.json', OHPM_VERSION)):
         if json.loads((root / relative).read_text()).get('version') != expected:
             raise ValueError('CLT tool version mismatch: ' + relative)
     sdk = root / 'sdk/default/openharmony'
     for namespace, manifest in (('openharmony', 'oh-uni-package.json'), ('hms', 'uni-package.json')):
         for component in ('native', 'ets', 'toolchains', 'js', 'previewer'):
             metadata = json.loads((root / 'sdk/default' / namespace / component / manifest).read_text())
-            if metadata.get('apiVersion') != '26' or metadata.get('version') != '26.0.0.105':
+            if metadata.get('apiVersion') != '26' or metadata.get('version') != SDK_VERSION:
                 raise ValueError('SDK version mismatch: ' + namespace + '/' + component)
     for namespace, names in (('openharmony', SIGNING_JARS), ('hms', HMS_SIGNING_JARS)):
         for name in names:
@@ -67,9 +72,9 @@ def check_tree(root, runtime=False):
                            'DEVECO_NODE_HOME': str(root / 'tool/node'),
                            'PATH': str(root / 'tool/node/bin') + ':' + os.environ.get('PATH', '')}
             for command, expected in ((['java', '-version'], r'version "21[.\"]'),
-                                      ([str(root / 'tool/node/bin/node'), '--version'], r'^v24\.14\.1$'),
-                                      (['bash', str(root / 'ohpm/bin/ohpm'), '--version'], r'^26\.0\.0\.630$'),
-                                      (['bash', str(root / 'bin/hvigorw'), '--version'], r'^6\.26\.8$'),
+                                      ([str(root / 'tool/node/bin/node'), '--version'], r'^v' + re.escape(NODE_VERSION) + '$'),
+                                      (['bash', str(root / 'ohpm/bin/ohpm'), '--version'], r'^' + re.escape(OHPM_VERSION) + '$'),
+                                      (['bash', str(root / 'bin/hvigorw'), '--version'], r'^' + re.escape(HVIGOR_VERSION) + '$'),
                                       ([str(sdk / 'native/llvm/bin/clang'), '--version'], r'clang version 15\.0\.4'),
                                       (['java', '-jar', str(sdk / 'toolchains/lib/hap-sign-tool.jar'), '-h'], r'sign-app')):
                 result = subprocess.run(command, env=environment, cwd=home, text=True,

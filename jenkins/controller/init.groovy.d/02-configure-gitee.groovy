@@ -88,10 +88,14 @@ jobs.each { job ->
     }
 
     def ready = apiToken instanceof GiteeApiToken && webhookSecret instanceof StringCredentials
-    job.setDisabled(!ready)
+    def jobConfig = project.jobs.values().find { it.name == job.fullName }
+    def enabled = ready && jobConfig.enabled != false
+    job.setDisabled(!enabled)
     job.save()
-    if (ready) {
+    if (enabled) {
         logger.info('Gitee MR 门禁已配置并启用。')
+    } else if (ready) {
+        logger.info('Gitee MR 门禁已配置，按受信项目声明保持禁用。')
     } else {
         def missing = []
         if (!(apiToken instanceof GiteeApiToken)) missing.add('gitee-api-token (Gitee API Token)')

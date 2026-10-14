@@ -8,11 +8,11 @@ AGENT_WORK_DIR="${JENKINS_AGENT_WORKDIR:-/home/jenkins/agent}"
 SECRET_FILE="${JENKINS_AGENT_SECRET_FILE:-/run/jenkins-agent-bootstrap/agent.secret}"
 AGENT_JAR="${AGENT_WORK_DIR}/agent.jar"
 : "${HARMONY_CLT_HOME:?Missing frozen Linux CLT}"
-[[ "${AGENT_NAME}" == linux-build || "${AGENT_NAME}" == signing-maintenance ]] || {
-  echo 'Only unified Linux build or signing maintenance agents are supported' >&2; exit 1;
+[[ "${AGENT_NAME}" =~ ^[A-Za-z0-9_.-]+$ ]] || {
+  echo 'Agent name must be a fixed safe identifier' >&2; exit 1;
 }
 
-if [[ "${AGENT_NAME}" == signing-maintenance ]]; then
+if [[ -n "${SIGNING_MAINTENANCE_ROOT:-}" ]]; then
   : "${GRADLE_USER_HOME:?Missing isolated maintenance cache}"
   [[ -z "${CI_LINUX_MEMORY_LOCK:-}" ]] || { echo 'Maintenance must not mount the build memory lock' >&2; exit 1; }
 else
@@ -45,7 +45,7 @@ test -f "${HARMONY_CLT_HOME}/sdk/default/openharmony/toolchains/lib/hap-sign-too
 python3 /usr/local/lib/ohos/clt.py check "${HARMONY_CLT_HOME}" --runtime
 
 private_dirs=("${AGENT_WORK_DIR}" "${GRADLE_USER_HOME:-/home/jenkins/.gradle}")
-if [[ "${AGENT_NAME}" == linux-build ]]; then
+if [[ -z "${SIGNING_MAINTENANCE_ROOT:-}" ]]; then
   private_dirs+=("${HARMONY_GRADLE_USER_HOME}")
 fi
 if [[ -n "${SIGNING_MAINTENANCE_ROOT:-}" ]]; then

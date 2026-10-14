@@ -3,8 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-REQUIRED_FASTLANE_VERSION="$(cat "${REPO_ROOT}/delivery/.fastlane-version")"
-REQUIRED_XCODE_VERSION="$(tr -d '[:space:]' < "${SCRIPT_DIR}/.xcode-version")"
+TOOLCHAIN_LOCK_CLI="${REPO_ROOT}/toolchains.py"
+REQUIRED_FASTLANE_VERSION="$(python3 "${TOOLCHAIN_LOCK_CLI}" version fastlane)"
+REQUIRED_JDK_VERSION="$(python3 "${TOOLCHAIN_LOCK_CLI}" version jdk)"
+REQUIRED_XCODE_VERSION="$(python3 "${TOOLCHAIN_LOCK_CLI}" version xcode)"
 ACTION="check"
 ACCEPT_ANDROID_LICENSES="false"
 SERVICE_USER="${JENKINS_PR_SERVICE_USER:-_sxmqlive_pr}"
@@ -19,9 +21,9 @@ PLIST_SOURCE="${SCRIPT_DIR}/com.sxmqlive.jenkins-pr-agent.plist.template"
 GITEE_KNOWN_HOSTS_SOURCE="${SCRIPT_DIR}/pr-agent/gitee-known-hosts"
 PLIST_TARGET="/Library/LaunchDaemons/com.sxmqlive.jenkins-pr-agent.plist"
 LAUNCHD_LABEL="com.sxmqlive.jenkins-pr-agent"
-REQUIRED_ANDROID_PLATFORM="android-36"
-REQUIRED_ANDROID_BUILD_TOOLS="35.0.0"
-REQUIRED_ANDROID_NDK="25.1.8937393"
+REQUIRED_ANDROID_PLATFORM="android-$(python3 "${TOOLCHAIN_LOCK_CLI}" version androidSDK)"
+REQUIRED_ANDROID_BUILD_TOOLS="$(python3 "${TOOLCHAIN_LOCK_CLI}" version androidBuildTools)"
+REQUIRED_ANDROID_NDK="$(python3 "${TOOLCHAIN_LOCK_CLI}" version androidNDK)"
 
 usage() {
   cat <<'EOF'
@@ -112,7 +114,7 @@ BREW_EXECUTABLE="$(resolve_executable brew)"
 BREW_PREFIX="$(${BREW_EXECUTABLE} --prefix)"
 SDKMANAGER_EXECUTABLE="$(resolve_executable sdkmanager)"
 POD_EXECUTABLE="$(resolve_executable pod)"
-JAVA_HOME_VALUE="${JENKINS_PR_JAVA_HOME:-${BREW_PREFIX}/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home}"
+JAVA_HOME_VALUE="${JENKINS_PR_JAVA_HOME:-${BREW_PREFIX}/opt/openjdk@${REQUIRED_JDK_VERSION}/libexec/openjdk.jdk/Contents/Home}"
 DEVELOPER_DIR_VALUE="${DEVELOPER_DIR:-$(/usr/bin/xcode-select -p 2>/dev/null || true)}"
 RUBY_BIN="$(${BREW_EXECUTABLE} --prefix ruby)/bin/ruby"
 TOOL_PATH="${RUBY_BIN%/*}:${BREW_PREFIX}/bin:${JAVA_HOME_VALUE}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -121,11 +123,11 @@ export DEVELOPER_DIR="${DEVELOPER_DIR_VALUE}"
 check_host_tools() {
   local iphoneos_sdk_path xcode_version
   [[ -x "${JAVA_HOME_VALUE}/bin/java" ]] || {
-    echo "JDK 21 is unavailable under ${JAVA_HOME_VALUE}." >&2
+    echo "JDK ${REQUIRED_JDK_VERSION} is unavailable under ${JAVA_HOME_VALUE}." >&2
     return 1
   }
-  "${JAVA_HOME_VALUE}/bin/java" -version 2>&1 | head -1 | grep -q '"21\.' || {
-    echo "JDK 21 is required." >&2
+  "${JAVA_HOME_VALUE}/bin/java" -version 2>&1 | head -1 | grep -q "\"${REQUIRED_JDK_VERSION}\." || {
+    echo "JDK ${REQUIRED_JDK_VERSION} is required." >&2
     return 1
   }
   JAVA_HOME="${JAVA_HOME_VALUE}" PATH="${TOOL_PATH}" "${SDKMANAGER_EXECUTABLE}" --version >/dev/null

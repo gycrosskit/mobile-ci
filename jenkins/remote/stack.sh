@@ -4,22 +4,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/compose-context.sh"
 
+check_selected_host() {
+  if [[ -n "${JENKINS_DEPLOYMENT_FILE:-}" ]]; then
+    python3 "${SCRIPT_DIR}/deployment-runtime.py" check "${JENKINS_DEPLOYMENT_FILE}" "${JENKINS_COMPOSE_FILE}"
+  else
+    bash "${SCRIPT_DIR}/check-host.sh"
+  fi
+}
+
 usage() {
   echo "Usage: $0 {check|build|start|stop|restart|status|logs|verify}"
 }
 
 case "${1:-}" in
   check)
-    bash "${SCRIPT_DIR}/check-host.sh"
+    check_selected_host
     check_compose_services
     ;;
   build)
-    bash "${SCRIPT_DIR}/check-host.sh"
+    [[ -z "${JENKINS_DEPLOYMENT_FILE:-}" ]] || { echo "Build reviewed images separately with toolchains.py build-args; deployment consumes exact installed image IDs." >&2; exit 2; }
+    check_selected_host
     check_compose_services
     "${COMPOSE[@]}" build "${CONTROLLER_SERVICE}" "${ANDROID_SERVICE}" "${PR_SERVICE}"
     ;;
   start)
-    bash "${SCRIPT_DIR}/check-host.sh"
+    check_selected_host
     check_compose_services
     "${COMPOSE[@]}" up --detach --no-build "${SERVICES[@]}"
     ;;
