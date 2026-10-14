@@ -56,7 +56,7 @@ def names = [] as Set
 manifest.nodes.each { agent ->
     if (!(agent instanceof Map) || agent.keySet() != ['id', 'name', 'labels', 'capabilities', 'target', 'remoteFS', 'executors'] as Set ||
         !(agent.name instanceof String) || !(agent.name ==~ /[A-Za-z0-9_.-]{1,64}/) || agent.name in ['.', '..'] ||
-        !(agent.id instanceof String) || !(agent.id ==~ /[a-z][a-z0-9-]{0,63}/) || ids.contains(agent.id) || names.contains(agent.name) ||
+        !(agent.id instanceof String) || !(agent.id ==~ /[a-z][a-z0-9-]{0,63}/) || agent.id == 'state-init' || ids.contains(agent.id) || names.contains(agent.name) ||
         agent.executors != 1 || !(agent.labels instanceof List) || agent.labels.isEmpty() ||
         agent.labels.any { !(it instanceof String) || !(it ==~ /[A-Za-z0-9_-]+/) } || agent.labels.toSet().size() != agent.labels.size() ||
         !(agent.capabilities instanceof List) || agent.capabilities.isEmpty() || agent.capabilities.toSet().size() != agent.capabilities.size() ||
@@ -66,7 +66,7 @@ manifest.nodes.each { agent ->
         ('ios' in agent.capabilities && agent.target.os != 'darwin') ||
         ('harmony' in agent.capabilities && (agent.target.os != 'linux' || agent.target.arch != 'amd64')) ||
         ('android' in agent.capabilities && agent.target.os == 'linux' && agent.target.arch != 'amd64') ||
-        ('pr-builder' in agent.labels && agent.labels.any { it in ['android-builder', 'mac-build', 'linux-build', 'signing-maintenance'] }) ||
+        ('pr-builder' in (agent.labels + [agent.name]) && (agent.labels + [agent.name]).any { it in ['android-builder', 'mac-build', 'linux-build', 'signing-maintenance'] }) ||
         !(agent.remoteFS instanceof String) || !(agent.remoteFS ==~ /\/[A-Za-z0-9_.\/-]+/) ||
         agent.remoteFS.split('/').drop(1).any { it in ['.', '..', ''] } ||
         !(agent.target.os == 'linux' ? agent.remoteFS.startsWith('/home/jenkins/') : (agent.remoteFS.startsWith('/Users/Shared/') || agent.remoteFS.startsWith('/private/var/lib/mobile-ci/')))) {

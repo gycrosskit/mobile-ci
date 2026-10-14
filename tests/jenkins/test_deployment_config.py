@@ -124,6 +124,17 @@ class DeploymentConfigTests(unittest.TestCase):
             with self.subTest(service=key):
                 self.rejected(lambda m: (m['controller'] if key == 'controller' else m['agents'][0]).update(id='state-init'))
 
+    def test_automatic_node_self_labels_preserve_pr_and_delivery_isolation(self):
+        self.rejected(lambda m: m['agents'][0].update(name='pr-builder'))
+        self.rejected(lambda m: m['agents'][1].update(name='android-builder'))
+        self.m['profiles']['example-mobile']['ios_test'] = 'mac-ios-one'
+        self.rejected(lambda m: m['agents'][-1].update(name='ios-pr-builder'))
+        self.m['profiles']['example-mobile'].pop('ios_test')
+        self.m['agents'][1]['name'] = 'pr-builder'
+        self.m['agents'][1]['labels'] = ['ci-tools']
+        project = {'id': 'example-mobile', 'jobs': {key: {} for key in self.m['profiles']['example-mobile']}}
+        self.assertEqual(['pr-one'], job_agent_bindings(validate_deployment(self.m), project)['ci_pr']['eligibleAgentIds'])
+
     def test_multiple_equivalent_build_agents_are_supported_as_label_pool(self):
         second = copy.deepcopy(self.m['agents'][0])
         second.update(id='android-two', name='android-two', secretRef='android-two-connection')
